@@ -71,21 +71,16 @@ if(isset($_POST['add-new'])) {
 
 if(isset($_POST['change-request'])) {
     try {
-        $requests = get_posts(array(
-            'post_type'=>'auth_card',
-            'post_status'=>'private',
-            'meta_query'=>array(
-                array('key'=>'approval_type', 'value'=>$_POST['approval-type']),
-                array('key'=>'uda_section', 'value'=>$_POST['uda-section']),
-                array('key'=>'legal_entity', 'value'=>$_POST['entity']),
-                array('key'=>'cost_center', 'value'=>$_POST['cost-center'], 'compare'=>'IN')
-            ),
-            'posts_per_page'=>-1
-            )
-        );
-        foreach($requests as $request) {
-            if(!empty($_POST['approver-for-' . $request->ID])) {
-                update_post_meta($request->ID, $_POST['approval'], $_POST['approver-for-' . $request->ID]);
+        if($_POST['uda-section'] === 'Employee Expense') {
+            foreach($_POST['ID'] as $id) {
+                update_post_meta($id, $_POST['approval'], $_POST['approver'][$id]);
+                update_post_meta($id, 'concur_auth_level-' . $_POST['approval'], $_POST['concur'][$id]);
+            }
+        } else {
+            foreach($_POST['ID'] as $id) {
+                update_post_meta($id, $_POST['approval'], $_POST['approver'][$id]);
+                update_post_meta($id, 'payment_auth_level-' . $_POST['approval'], $_POST['payment'][$id]);
+                update_post_meta($id, 'pr_auth_level-' . $_POST['approval'], json_encode($_POST['pr'][$id]));
             }
         }
         $success = "Change request submitted.";
@@ -116,8 +111,8 @@ if(isset($_POST['change-request'])) {
 	margin-bottom: 0;
 }
 .change-request-modal {
-    width: 1100px;
-    margin-left: -550px;
+    width: 1200px;
+    margin-left: -600px;
 }
 .table-view th, .table-view td {
     text-align: center;
