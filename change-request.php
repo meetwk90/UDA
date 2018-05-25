@@ -17,25 +17,26 @@ $auth_cards = get_posts(array(
     <?php foreach($auth_cards as $auth_card) { ?>
     <input type="hidden" name="ID[]" value="<?=$auth_card->ID?>" />
     <table class="table table-bordered">
-        <tbody>
+        <?php if(is_array(json_decode($auth_card->$_POST['approval']))) { ?>
+            <?php foreach(json_decode($auth_card->$_POST['approval']) as $approver) { ?>
+        <tbody class="section">
             <tr>
-                <td>
+                <th>
                     <label>Entity</label>
                     <input type="text" value="<?=$_POST['entity']?>" readonly>
-                </td>
-                
-                <td style="border-left:none">
+                </th>
+                <th style="border-left:none">
                     <label>UDA Section</label>
                     <input type="text" value="<?=$_POST['section']?>" readonly>
-                </td>
-                <td style="border-left:none">
+                </th>
+                <th style="border-left:none">
                     <label>Operation/Finance Approval</label>
                     <input type="text" value="<?=$_POST['type']?>" readonly>
-                </td>
-                <td style="border-left:none">
+                </th>
+                <th style="border-left:none">
                     <label>Cost Center</label>
                     <input style="width:250px" type="text" value="<?=$auth_card->cost_center?> [<?=$auth_card->cost_center_description?>]" readonly>
-                </td>
+                </th>
             </tr>
             <?php if($_POST['section'] !== 'Employee Expense') { ?> 
             <tr class="table-condensed">
@@ -48,8 +49,8 @@ $auth_cards = get_posts(array(
                     <label><?=$pr_approval_category[0]?></label>
                     <div class="input-prepend">
                         <span class="add-on">$</span>
-                        <?php $pr_title = 'pr_auth_level-' . $_POST['approval']; ?>
-                        <input type="number" name="pr[<?=$auth_card->ID?>][<?=$pr_approval_category[0]?>]" value="<?=json_decode($auth_card->$pr_title)->$pr_approval_category[0]?>" style="width:180px" readonly>
+                        <?php $pr_title = 'pr_auth_level-' . $approver; ?>
+                        <input type="number" class="editable" name="pr[<?=$auth_card->ID?>][<?=$pr_approval_category[0]?>][]" value="<?=json_decode($auth_card->$pr_title)->$pr_approval_category[0]?>" style="width:180px" readonly>
                     </div>
                     <button type="button" class="btn btn-success btn-small edit-pr-approval">Edit</button>
                 </td>
@@ -57,7 +58,7 @@ $auth_cards = get_posts(array(
                     <label><?=$pr_approval_category[1]?></label>
                     <div class="input-prepend">
                         <span class="add-on">$</span>
-                        <input type="number" name="pr[<?=$auth_card->ID?>][<?=$pr_approval_category[1]?>]" value="<?=json_decode($auth_card->$pr_title)->$pr_approval_category[1]?>" style="width:180px" readonly>
+                        <input type="number" class="editable" name="pr[<?=$auth_card->ID?>][<?=$pr_approval_category[1]?>][]" value="<?=json_decode($auth_card->$pr_title)->$pr_approval_category[1]?>" style="width:180px" readonly>
                     </div>
                     <button type="button" class="btn btn-success btn-small edit-pr-approval">Edit</button>
                 </td>
@@ -65,7 +66,7 @@ $auth_cards = get_posts(array(
                     <label><?=$pr_approval_category[2]?></label>
                     <div class="input-prepend">
                         <span class="add-on">$</span>
-                        <input type="number" name="pr[<?=$auth_card->ID?>][<?=$pr_approval_category[2]?>]" value="<?=json_decode($auth_card->$pr_title)->$pr_approval_category[2]?>" style="width:180px" readonly>
+                        <input type="number" class="editable" name="pr[<?=$auth_card->ID?>][<?=$pr_approval_category[2]?>][]" value="<?=json_decode($auth_card->$pr_title)->$pr_approval_category[2]?>" style="width:180px" readonly>
                     </div>
                     <button type="button" class="btn btn-success btn-small edit-pr-approval">Edit</button>
                 </td>
@@ -73,7 +74,7 @@ $auth_cards = get_posts(array(
                     <label><?=$pr_approval_category[3]?><br>&nbsp;</label>
                     <div class="input-prepend">
                         <span class="add-on">$</span>
-                        <input type="number" name="pr[<?=$auth_card->ID?>][<?=$pr_approval_category[3]?>]" value="<?=json_decode($auth_card->$pr_title)->$pr_approval_category[3]?>" style="width:180px" readonly>
+                        <input type="number" class="editable" name="pr[<?=$auth_card->ID?>][<?=$pr_approval_category[3]?>][]" value="<?=json_decode($auth_card->$pr_title)->$pr_approval_category[3]?>" style="width:180px" readonly>
                     </div>
                     <button type="button" class="btn btn-success btn-small edit-pr-approval">Edit</button>
                 </td>
@@ -83,35 +84,21 @@ $auth_cards = get_posts(array(
                     <label>Payment Request Signing Authorization Level</label>
                     <div class="input-prepend">
                         <span class="add-on">$</span>
-                            <?php $payment_title = 'payment_auth_level-' . $_POST['approval']; ?>
-                        <input type="number" name="payment[<?=$auth_card->ID?>]" value="<?=$auth_card->$payment_title?>" style="width:180px" readonly>
+                            <?php $payment_title = 'payment_auth_level-' . $approver; ?>
+                        <input type="number" class="editable" name="payment[<?=$auth_card->ID?>][]" value="<?=$auth_card->$payment_title?>" style="width:180px" readonly>
                     </div>
                     <button type="button" class="btn btn-success btn-small edit-payment">Edit</button>
                 </td>
-                <td colspan="2" class="approvers">
+                <td colspan="2">
                     <label>Name of approver</label>
-                    <?php if(is_array(json_decode($auth_card->$_POST['approval']))) { ?>
-                        <?php foreach(json_decode($auth_card->$_POST['approval']) as $approver) { ?>
                     <div class="approver" style="margin-bottom:5px">
-                        <input type="text" name="approver[<?=$auth_card->ID?>][]" value="<?=$approver?>" readonly>
+                        <input type="text" class="editable" name="approver[<?=$auth_card->ID?>][]" value="<?=$approver?>" readonly>
                             <?php if($_POST['approval'] !== 'Group CEO' && $_POST['approval'] !== 'Group CFO') { ?>
                         <button type="button" class="btn btn-success btn-small edit-approver">Edit</button>
+                        <button type="button" class="btn add-approver pull-right" style="margin-left:5px"><i class="icon-plus"></i></button>
+                        <button type="button" class="btn remove-approver pull-right"><i class="icon-minus"></i></button>
                             <?php } ?>
-                        <button type="button" class="btn remove-approver hide"><i class="icon-minus"></i></button>
                     </div>
-                        <?php } ?>
-                    <?php } else { ?>
-                    <div class="approver" style="margin-bottom:5px">
-                        <input type="text" name="approver[<?=$auth_card->ID?>][]" readonly>
-                            <?php if($_POST['approval'] !== 'Group CEO' && $_POST['approval'] !== 'Group CFO') { ?>
-                        <button type="button" class="btn btn-success btn-small edit-approver">Edit</button>
-                            <?php } ?>
-                        <button type="button" class="btn remove-approver hide"><i class="icon-minus"></i></button>
-                    </div>
-                    <?php } ?>
-                    <?php if($_POST['approval'] !== 'Group CEO' && $_POST['approval'] !== 'Group CFO') { ?>
-                    <button type="button" class="btn add-approver"><i class="icon-plus"></i></button>
-                    <?php } ?>
                 </td>
             </tr>
             <?php } else { ?>
@@ -120,39 +107,27 @@ $auth_cards = get_posts(array(
                     <label>CONCUR Authorization Level</label>
                     <div class="input-prepend">
                         <span class="add-on">$</span>
-                            <?php $concur_title = 'concur_auth_level-' . $_POST['approval']; ?>
-                        <input type="number" name="concur[<?=$auth_card->ID?>]" value="<?=$auth_card->$concur_title?>" style="width:180px" readonly>
+                            <?php $concur_title = 'concur_auth_level-' . $approver; ?>
+                        <input type="number" class="editable" name="concur[<?=$auth_card->ID?>][]" value="<?=$auth_card->$concur_title?>" style="width:180px" readonly>
                     </div>
                     <button type="button" class="btn btn-success btn-small edit-concur">Edit</button>
                 </td>
                 <td colspan="2" class="approvers">
                     <label>Name of approver</label>
-                    <?php if(is_array(json_decode($auth_card->$_POST['approval']))) { ?>
-                        <?php foreach(json_decode($auth_card->$_POST['approval']) as $approver) { ?>
                     <div class="approver" style="margin-bottom:5px">
-                        <input type="text" name="approver[<?=$auth_card->ID?>][]" value="<?=$approver?>" readonly>
+                        <input type="text" class="editable" name="approver[<?=$auth_card->ID?>][]" value="<?=$approver?>" readonly>
                             <?php if($_POST['approval'] !== 'Group CEO' && $_POST['approval'] !== 'Group CFO') { ?>
                         <button type="button" class="btn btn-success btn-small edit-approver">Edit</button>
+                        <button type="button" class="btn add-approver pull-right" style="margin-left:5px"><i class="icon-plus"></i></button>
+                        <button type="button" class="btn remove-approver pull-right"><i class="icon-minus"></i></button>
                             <?php } ?>
-                        <button type="button" class="btn remove-approver hide"><i class="icon-minus"></i></button>
                     </div>
-                        <?php } ?>
-                    <?php } else { ?>
-                    <div class="approver" style="margin-bottom:5px">
-                        <input type="text" name="approver[<?=$auth_card->ID?>][]" readonly>
-                            <?php if($_POST['approval'] !== 'Group CEO' && $_POST['approval'] !== 'Group CFO') { ?>
-                        <button type="button" class="btn btn-success btn-small edit-approver">Edit</button>
-                            <?php } ?>
-                        <button type="button" class="btn remove-approver hide"><i class="icon-minus"></i></button>
-                    </div>
-                    <?php } ?>
-                    <?php if($_POST['approval'] !== 'Group CEO' && $_POST['approval'] !== 'Group CFO') { ?>
-                    <button type="button" class="btn add-approver"><i class="icon-plus"></i></button>
-                    <?php } ?>
                 </td>
             </tr>
             <?php } ?>
         </tbody>
+            <?php } ?>
+        <?php } ?>
     </table>
     <?php } ?>
     <input type="hidden" name="approval" value="<?=$_POST['approval']?>">
@@ -167,14 +142,12 @@ $auth_cards = get_posts(array(
             $(this).prev().children().attr('readonly', false);
             $(this).remove();
         });
-        $('.add-approver').click(function() {
-            if($(this).prev().hasClass('approver')) {
-                cloned = $(this).prev();
-            }
-            cloned.clone().find('input').val('').attr('readonly', false).end().find('.edit-approver').hide().end().find('.remove-approver').show().end().insertAfter(cloned);
+        $('.table').on('click', '.add-approver', function() {
+            cloned = $(this).closest('.section');
+            cloned.clone().find('.editable').val('').attr('readonly', false).end().find('.edit-approver, .edit-payment, .edit-concur, .edit-pr-approval').hide().end().insertAfter(cloned);
         });
-        $('.approvers').on('click', '.remove-approver', function() {
-            $(this).closest('.approver').remove();
+        $('.table').on('click', '.remove-approver', function() {
+            $(this).closest('.section').remove();
         });
     });
     </script>

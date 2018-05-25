@@ -4,13 +4,6 @@ $cost_centers = json_decode(get_option('cost_center'));
 $uda_approval = json_decode(get_option('uda_approval'));
 $company_leaders = json_decode(get_option('company_leaders'));
 
-$auth_cards = get_posts(array(
-    'post_type'=>'auth_card',
-    'post_status'=>'private',
-    'posts_per_page'=>-1
-    )
-);
-
 if(isset($_POST['filter'])) {
     foreach($entities as $key=>$value) {
         if(in_array($_POST['entity'], $value)) {
@@ -18,6 +11,26 @@ if(isset($_POST['filter'])) {
         }
     }
 }
+
+foreach($uda_approval as $approval) {
+    if($approval->entity_type === $_POST['entity-type'] && $approval->uda_section === $_POST['uda-section'] && $approval->approval_type === $_POST['approval-type']) {
+        $positions = $approval->approval;
+    }
+}
+
+$auth_cards = get_posts(array(
+    'post_type'=>'auth_card',
+    'post_status'=>'private',
+    'meta_query'=>array(
+        array('key'=>'approval_type', 'value'=>$_POST['approval-type']),
+        array('key'=>'uda_section', 'value'=>$_POST['uda-section']),
+        array('key'=>'legal_entity', 'value'=>$_POST['entity']),
+        array('key'=>'entity_type', 'value'=>$_POST['entity-type'])
+    ),
+    'posts_per_page'=>-1
+    )
+);
+
 
 if(isset($_POST['add-entity'])) {
     try {
@@ -65,9 +78,12 @@ if(isset($_POST['add-new'])) {
         add_post_meta($request_id, 'approval_type', $_POST['approval-type']);
         add_post_meta($request_id, 'cost_center', trim($_POST['cost-center']));
         add_post_meta($request_id, 'cost_center_description', trim($_POST['description']));
+        foreach($positions as $position) {
+            add_post_meta($request_id, $position, json_encode(array('')));
+        }
         if($_POST['uda-section'] === 'Non-CapEx') {
             $title = $_POST['approval-type'] === 'Operation Approval' ? 'Group CEO' : 'Group CFO';
-            add_post_meta($request_id, $title, json_encode($company_leaders->$title));
+            update_post_meta($request_id, $title, json_encode($company_leaders->$title));
         }
         $success = "Cost Center has been added!";
     } catch(Exception $e) {
@@ -77,17 +93,20 @@ if(isset($_POST['add-new'])) {
 
 if(isset($_POST['change-request'])) {
     try {
-        if($_POST['uda-section'] === 'Employee Expense') {
-            foreach($_POST['ID'] as $id) {
-                update_post_meta($id, $_POST['approval'], json_encode($_POST['approver'][$id]));
-                update_post_meta($id, 'concur_auth_level-' . $_POST['approval'], $_POST['concur'][$id]);
-            }
-        } else {
-            foreach($_POST['ID'] as $id) {
-                update_post_meta($id, $_POST['approval'], json_encode($_POST['approver'][$id]));
-                update_post_meta($id, 'payment_auth_level-' . $_POST['approval'], $_POST['payment'][$id]);
-                update_post_meta($id, 'pr_auth_level-' . $_POST['approval'], json_encode($_POST['pr'][$id]));
-            }
+        foreach($_POST['ID'] as $id) {
+            $approver = is_array($_POST['approver'][$id]) ? $_POST['approver'][$id] : array('');
+            update_post_meta($id, $_POST['approval'], json_encode($approver));
+            foreach($_POST['approver'][$id] as $key=>$approver) {
+                if($_POST['uda-section'] === 'Employee Expense') {
+                    update_post_meta($id, 'concur_auth_level-' . $approver, $_POST['concur'][$id][$key]);
+                } else {
+                    update_post_meta($id, 'payment_auth_level-' . $approver, $_POST['payment'][$id][$key]);
+                    $categories = array_map(function($array) use($key) {
+                        return $array[$key];
+                    }, $_POST['pr'][$id]);
+                    update_post_meta($id, 'pr_auth_level-' . $approver, json_encode($categories));
+                }
+            }            
         }
         $success = "Change request submitted.";
     } catch(Exception $e) {
@@ -192,7 +211,6 @@ if(isset($_POST['change-request'])) {
                         <th class="level" colspan="5">Reginonal Level</th>
                     </tr>
                     <?php foreach($auth_cards as $auth_card) { ?>
-                        <?php if($auth_card->approval_type === $_POST['approval-type'] && $auth_card->uda_section === $_POST['uda-section'] && $auth_card->legal_entity === $_POST['entity']) { ?>
                     <tr>
                         <td><?=$auth_card->cost_center_description?></td>
                         <td><?=$auth_card->cost_center?></td>
@@ -205,7 +223,6 @@ if(isset($_POST['change-request'])) {
                             <?php } ?>
                         <?php } ?>
                     </tr>
-                        <?php } ?>
                     <?php } ?>
                 </tbody>
             </table>
@@ -256,9 +273,7 @@ if(isset($_POST['change-request'])) {
                     <div class="controls">
                         <select id="cost-center-for-change-request" name="cost-center[]" multiple required>
                             <?php foreach($auth_cards as $auth_card) { ?>
-                                <?php if($auth_card->approval_type === $_POST['approval-type'] && $auth_card->uda_section === $_POST['uda-section'] && $auth_card->legal_entity === $_POST['entity']) { ?>
                             <option value="<?=$auth_card->cost_center?>"><?=$auth_card->cost_center?> [<?=$auth_card->cost_center_description?>]</option>
-                                <?php } ?>
                             <?php } ?>
                         </select>
                     </div>
