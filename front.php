@@ -1,4 +1,7 @@
 <?php 
+// ini_set('display_errors', true);
+// error_reporting(E_ALL);
+
 $entities = json_decode(get_option('legal_entity'));
 $cost_centers = json_decode(get_option('cost_center'));
 $uda_approval = json_decode(get_option('uda_approval'));
@@ -10,27 +13,12 @@ if(isset($_POST['filter'])) {
             $_POST['entity-type'] = $key;
         }
     }
-}
-
-foreach($uda_approval as $approval) {
-    if($approval->entity_type === $_POST['entity-type'] && $approval->uda_section === $_POST['uda-section'] && $approval->approval_type === $_POST['approval-type']) {
-        $positions = $approval->approval;
+    foreach($uda_approval as $approval) {
+        if($approval->entity_type === $_POST['entity-type'] && $approval->uda_section === $_POST['uda-section'] && $approval->approval_type === $_POST['approval-type']) {
+            $positions = $approval->approval;
+        }
     }
 }
-
-$auth_cards = get_posts(array(
-    'post_type'=>'auth_card',
-    'post_status'=>'private',
-    'meta_query'=>array(
-        array('key'=>'approval_type', 'value'=>$_POST['approval-type']),
-        array('key'=>'uda_section', 'value'=>$_POST['uda-section']),
-        array('key'=>'legal_entity', 'value'=>$_POST['entity']),
-        array('key'=>'entity_type', 'value'=>$_POST['entity-type'])
-    ),
-    'posts_per_page'=>-1
-    )
-);
-
 
 if(isset($_POST['add-entity'])) {
     try {
@@ -93,26 +81,91 @@ if(isset($_POST['add-new'])) {
 
 if(isset($_POST['change-request'])) {
     try {
-        foreach($_POST['ID'] as $id) {
-            $approver = is_array($_POST['approver'][$id]) ? $_POST['approver'][$id] : array('');
-            update_post_meta($id, $_POST['approval'], json_encode($approver));
-            foreach($_POST['approver'][$id] as $key=>$approver) {
-                if($_POST['uda-section'] === 'Employee Expense') {
-                    update_post_meta($id, 'concur_auth_level-' . $approver, $_POST['concur'][$id][$key]);
+        if(is_user_logged_in()) {      
+            foreach($_POST['ID'] as $id) {
+                $existing_request = get_posts(array(
+                    'post_type'=>'auth_change_request',
+                    'post_status'=>'private',
+                    'meta_query'=>array(
+                        array('key'=>'auth_card_id', 'value'=>$id),
+                    ),
+                    'posts_per_page'=>-1
+                    )          
+                )[0];
+                if($existing_request) {
+                    $request_id = $existing_request->ID;
                 } else {
-                    update_post_meta($id, 'payment_auth_level-' . $approver, $_POST['payment'][$id][$key]);
-                    $categories = array_map(function($array) use($key) {
-                        return $array[$key];
-                    }, $_POST['pr'][$id]);
-                    update_post_meta($id, 'pr_auth_level-' . $approver, json_encode($categories));
+                    $request_id = wp_insert_post(array(
+                        'post_type'=>'auth_change_request',
+                        'post_title'=>'Auth Changing Request',
+                        'post_status'=>'private'
+                    ));
                 }
-            }            
+                update_post_meta($request_id, 'auth_card_id', $id);
+                $approvers = is_array($_POST['approver'][$id]) ? $_POST['approver'][$id] : array('');
+                update_post_meta($request_id, $_POST['approval'], json_encode($approvers));
+                if($_POST['uda-section'] === 'Employee Expense') {
+                    $concur_auth_level = json_decode(get_post_meta($request_id, 'concur_auth_level', true));
+                    $concur_auth_level->$_POST['approval'] = array();
+                    foreach($_POST['approver'][$id] as $key=>$approver) {
+                        array_push($concur_auth_level->$_POST['approval'], array($approver=>$_POST['concur'][$id][$key]));                      
+                    }
+                    update_post_meta($request_id, 'concur_auth_level', json_encode($concur_auth_level));
+                } else {
+                    $payment_auth_level = json_decode(get_post_meta($request_id, 'payment_auth_level', true));
+                    $payment_auth_level->$_POST['approval'] = array();
+                    $pr_auth_level = json_decode(get_post_meta($request_id, 'pr_auth_level', true));
+                    $pr_auth_level->$_POST['approval'] = array();
+                    foreach($_POST['approver'][$id] as $key=>$approver) {
+                        array_push($payment_auth_level->$_POST['approval'], array($approver=>$_POST['payment'][$id][$key])); 
+                        $categories = array_map(function($array) use($key) {
+                            return $array[$key];
+                        }, $_POST['pr'][$id]);
+                        array_push($pr_auth_level->$_POST['approval'], array($approver=>json_encode($categories)));
+                    }
+                    update_post_meta($request_id, 'payment_auth_level', json_encode($payment_auth_level));
+                    update_post_meta($request_id, 'pr_auth_level', json_encode($pr_auth_level));
+                }
+                update_post_meta($request_id, 'legal_entity', $_POST['entity']); 
+                update_post_meta($request_id, 'uda_section', $_POST['uda-section']); 
+                update_post_meta($request_id, 'approval_type', $_POST['approval-type']);
+                update_post_meta($request_id, 'cost_center', get_post_meta($id, 'cost_center', true) . ' [' . get_post_meta($id, 'cost_center_description', true) . ']');    
+                update_post_meta($request_id, 'requestor_id', get_current_user_id());
+                update_post_meta($request_id, 'requestor', wp_get_current_user()->display_name);
+                update_post_meta($request_id, 'requestor_email', wp_get_current_user()->user_email);
+                update_post_meta($request_id, 'changed_date', date("Y-m-d"));  
+            }
+            $success = "Request has been submitted!";
+        } else {
+            $error = "Please log in.";
         }
-        $success = "Change request submitted.";
     } catch(Exception $e) {
         $error = $e->getMessage();
     }
 }
+
+$auth_cards = get_posts(array(
+    'post_type'=>'auth_card',
+    'post_status'=>'private',
+    'meta_query'=>array(
+        array('key'=>'approval_type', 'value'=>$_POST['approval-type']),
+        array('key'=>'uda_section', 'value'=>$_POST['uda-section']),
+        array('key'=>'legal_entity', 'value'=>$_POST['entity']),
+        array('key'=>'entity_type', 'value'=>$_POST['entity-type'])
+    ),
+    'posts_per_page'=>-1
+    )
+);
+
+$change_requests = get_posts(array(
+    'post_type'=>'auth_change_request',
+    'post_status'=>'private',
+    'meta_query'=>array(
+        array('key'=>'requestor_id', 'value'=>get_current_user_id()),
+    ),
+    'posts_per_page'=>-1
+    )          
+);
 ?>
 
 <style>
@@ -167,68 +220,106 @@ if(isset($_POST['change-request'])) {
         <div class="alert alert-success"><?=$success?></div>
         <?php } ?>
 		<div class="row-fluid">
-            <form method="post" class="form-inline pull-left">
-                <select name="entity" id="entity-selected">
-                    <?php foreach($entities as $entity_type) { ?>
-                        <?php foreach($entity_type as $entity) { ?>
-                        <option value="<?=$entity?>" <?php if(isset($_POST['filter']) && $_POST['entity'] === $entity) { ?>selected<?php } ?>><?=$entity?></option>
-                        <?php } ?>
-                    <?php } ?>
-                </select>
-                <select name="uda-section" id="uda-section-selected">
-                    <option value="CapEx" <?php if(isset($_POST['filter']) && $_POST['uda-section'] === 'CapEx') { ?>selected<?php } ?>>CapEx</option>
-                    <option value="Non-CapEx" <?php if(isset($_POST['filter']) && $_POST['uda-section'] === 'Non-CapEx') { ?>selected<?php } ?>>Non-CapEx</option>
-                    <option value="Employee Expense" <?php if(isset($_POST['filter']) && $_POST['uda-section'] === 'Employee Expense') { ?>selected<?php } ?>>Employee Expense</option>
-                </select>
-                <select name="approval-type" id="approval-type-selected">
-                    <option value="Operation Approval" <?php if(isset($_POST['filter']) && $_POST['approval-type'] === 'Operation Approval') { ?>selected<?php } ?>>Operation Approval</option>
-                    <option value="Finance Approval" <?php if(isset($_POST['filter']) && $_POST['approval-type'] === 'Finance Approval') { ?>selected<?php } ?>>Finance Approval</option>
-                </select>
-                <button type="submit" id="filter" name="filter" class="btn">Filter</button>
-            </form>
-            <button type="button" onclick="addEntity()" class="btn btn-primary pull-right">Add Legal Entity</button>
-            <?php if(isset($_POST['filter'])) { ?>
-            <table class="table table-bordered table-view">
-                <tbody>
-                    <tr>
-                        <th colspan="2"><?=$_POST['approval-type']?></th>
-                        <th class="no-border"></th>
-                        <?php foreach($uda_approval as $approval) { ?>
-                            <?php if($approval->approval_type === $_POST['approval-type'] && $approval->uda_section === $_POST['uda-section'] && $approval->entity_type === $_POST['entity-type']) { ?>
-                                <?php foreach($approval->approval as $position) { ?>
-                        <th class="position"><?=$position?></th>
+            <div class="tabbale">
+                <ul class="nav nav-tabs">
+                    <li class="active">
+                        <a href="#master" data-toggle="tab">Master Table</a>
+                    </li>
+                    <li>
+                        <a href="#changes" data-toggle="tab">Change Request</a>
+                    </li>
+                </ul>
+            </div>
+            <div class="tab-content">
+                <div class="tab-pane active" id="master">
+                    <form method="post" class="form-inline pull-left">
+                        <select name="entity" id="entity-selected">
+                            <?php foreach($entities as $entity_type) { ?>
+                                <?php foreach($entity_type as $entity) { ?>
+                                <option value="<?=$entity?>" <?php if(isset($_POST['filter']) && $_POST['entity'] === $entity) { ?>selected<?php } ?>><?=$entity?></option>
                                 <?php } ?>
                             <?php } ?>
-                        <?php } ?>
-                    </tr>
-                    <tr>
-                        <th>Cost Center Description</th>
-                        <th>Cost Center</th>
-                        <th class="no-border"></th>
-                        <?php if($_POST['uda-section'] === 'Non-CapEx') { ?>
-                        <th class="level">Group Level</th>
-                        <?php } ?>
-                        <th class="level" colspan="5">Reginonal Level</th>
-                    </tr>
-                    <?php foreach($auth_cards as $auth_card) { ?>
-                    <tr>
-                        <td><?=$auth_card->cost_center_description?></td>
-                        <td><?=$auth_card->cost_center?></td>
-                        <td class="no-border"></td>
-                        <?php foreach($uda_approval as $approval) { ?>
-                            <?php if($approval->approval_type === $_POST['approval-type'] && $approval->uda_section === $_POST['uda-section'] && $approval->entity_type === $_POST['entity-type']) { ?>
-                                <?php foreach($approval->approval as $position) { ?>
-                        <td><?php foreach(json_decode($auth_card->$position) as $approver) { echo $approver . "<br>"; } ?></td>
+                        </select>
+                        <select name="uda-section" id="uda-section-selected">
+                            <option value="CapEx" <?php if(isset($_POST['filter']) && $_POST['uda-section'] === 'CapEx') { ?>selected<?php } ?>>CapEx</option>
+                            <option value="Non-CapEx" <?php if(isset($_POST['filter']) && $_POST['uda-section'] === 'Non-CapEx') { ?>selected<?php } ?>>Non-CapEx</option>
+                            <option value="Employee Expense" <?php if(isset($_POST['filter']) && $_POST['uda-section'] === 'Employee Expense') { ?>selected<?php } ?>>Employee Expense</option>
+                        </select>
+                        <select name="approval-type" id="approval-type-selected">
+                            <option value="Operation Approval" <?php if(isset($_POST['filter']) && $_POST['approval-type'] === 'Operation Approval') { ?>selected<?php } ?>>Operation Approval</option>
+                            <option value="Finance Approval" <?php if(isset($_POST['filter']) && $_POST['approval-type'] === 'Finance Approval') { ?>selected<?php } ?>>Finance Approval</option>
+                        </select>
+                        <button type="submit" id="filter" name="filter" class="btn">Filter</button>
+                    </form>
+                    <button type="button" onclick="addEntity()" class="btn btn-primary pull-right">Add Legal Entity</button>
+                    <?php if(isset($_POST['filter'])) { ?>
+                    <table class="table table-bordered table-view">
+                        <tbody>
+                            <tr>
+                                <th colspan="2"><?=$_POST['approval-type']?></th>
+                                <th class="no-border"></th>
+                                <?php foreach($uda_approval as $approval) { ?>
+                                    <?php if($approval->approval_type === $_POST['approval-type'] && $approval->uda_section === $_POST['uda-section'] && $approval->entity_type === $_POST['entity-type']) { ?>
+                                        <?php foreach($approval->approval as $position) { ?>
+                                <th class="position"><?=$position?></th>
+                                        <?php } ?>
+                                    <?php } ?>
                                 <?php } ?>
+                            </tr>
+                            <tr>
+                                <th>Cost Center Description</th>
+                                <th>Cost Center</th>
+                                <th class="no-border"></th>
+                                <?php if($_POST['uda-section'] === 'Non-CapEx') { ?>
+                                <th class="level">Group Level</th>
+                                <?php } ?>
+                                <th class="level" colspan="5">Reginonal Level</th>
+                            </tr>
+                            <?php foreach($auth_cards as $auth_card) { ?>
+                            <tr>
+                                <td><?=$auth_card->cost_center_description?></td>
+                                <td><?=$auth_card->cost_center?></td>
+                                <td class="no-border"></td>
+                                <?php foreach($uda_approval as $approval) { ?>
+                                    <?php if($approval->approval_type === $_POST['approval-type'] && $approval->uda_section === $_POST['uda-section'] && $approval->entity_type === $_POST['entity-type']) { ?>
+                                        <?php foreach($approval->approval as $position) { ?>
+                                <td><?php foreach(json_decode($auth_card->$position) as $approver) { echo $approver . "<br>"; } ?></td>
+                                        <?php } ?>
+                                    <?php } ?>
+                                <?php } ?>
+                            </tr>
                             <?php } ?>
-                        <?php } ?>
-                    </tr>
+                        </tbody>
+                    </table>
+                    <button type="button" onclick="addNew()" class="btn btn-success">Add New</button>
+                    <button type="button" onclick="changeRequest()" class="btn btn-success pull-right">Change</button>                        
                     <?php } ?>
-                </tbody>
-            </table>
-            <button type="button" onclick="addNew()" class="btn btn-success">Add New</button>
-            <button type="button" onclick="changeRequest()" class="btn btn-success pull-right">Change</button>                        
-            <?php } ?>
+                </div>
+                <div class="tab-pane" id="changes">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Legal Entity</th>
+                                <th>UDA Section</th>
+                                <th>Approval Type</th>
+                                <th>Cost Center</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach($change_requests as $row) { ?>
+                            <tr>
+                                <td><?=$row->ID?></td>
+                                <td><?=$row->legal_entity?></td>
+                                <td><?=$row->uda_section?></td>
+                                <td><?=$row->approval_type?></td>
+                                <td><?=$row->cost_center?></td>
+                            </tr>
+                            <?php } ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -336,6 +427,7 @@ if(isset($_POST['change-request'])) {
                     <input type="hidden" name="entity-type" value="<?=$_POST['entity-type']?>">
                     <input type="hidden" name="uda-section" value="<?=$_POST['uda-section']?>">
                     <input type="hidden" name="approval-type" value="<?=$_POST['approval-type']?>">
+                    <input type="hidden" name="filter">
                 </div>
             </div>
             <div class="modal-footer">
@@ -427,6 +519,12 @@ jQuery(function($) {
                 $('.change-request-modal .modal-body').html($html);
             }
         )
+    });
+    $('.btn-primary').click(function() {
+        btn_submit = $(this);
+        setTimeout(function() {
+            btn_submit.button('reset');
+        }, 5000);
     });
 });
 </script>
