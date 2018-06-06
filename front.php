@@ -40,38 +40,51 @@ if(isset($_POST['add-entity'])) {
 
 if(isset($_POST['add-new'])) {
     try {
-        $duplicated_auth = get_posts(array(
-            'post_type'=>'auth_card',
-            'post_status'=>'private',
-            'meta_query'=>array(
-                array('key'=>'approval_type', 'value'=>$_POST['approval-type']),
-                array('key'=>'uda_section', 'value'=>$_POST['uda-section']),
-                array('key'=>'legal_entity', 'value'=>$_POST['entity']),
-                array('key'=>'cost_center', 'value'=>$_POST['cost-center'])
-            ),
-            'posts_per_page'=>-1
-            )
-        );
-        if(!empty($duplicated_auth)) {
-            throw new Exception("Cost Center exists!");
-        }
-        $request_id = wp_insert_post(array(
-            'post_type'=>'auth_card',
-            'post_title'=>'Auth Card',
-            'post_status'=>'private'
-        ));
-        add_post_meta($request_id, 'legal_entity', $_POST['entity']);
-        add_post_meta($request_id, 'entity_type', $_POST['entity-type']);
-        add_post_meta($request_id, 'uda_section', $_POST['uda-section']);
-        add_post_meta($request_id, 'approval_type', $_POST['approval-type']);
-        add_post_meta($request_id, 'cost_center', trim($_POST['cost-center']));
-        add_post_meta($request_id, 'cost_center_description', trim($_POST['description']));
-        foreach($positions as $position) {
-            add_post_meta($request_id, $position, json_encode(array('')));
-        }
-        if($_POST['uda-section'] === 'Non-CapEx') {
-            $title = $_POST['approval-type'] === 'Operation Approval' ? 'Group CEO' : 'Group CFO';
-            update_post_meta($request_id, $title, json_encode($company_leaders->$title));
+        foreach($_POST['uda-section'] as $section) {
+            $duplicated_auth = get_posts(array(
+                'post_type'=>'auth_card',
+                'post_status'=>'private',
+                'meta_query'=>array(
+                    array('key'=>'uda_section', 'value'=>$section),
+                    array('key'=>'legal_entity', 'value'=>$_POST['entity']),
+                    array('key'=>'cost_center', 'value'=>$_POST['cost-center'])
+                ),
+                'posts_per_page'=>-1
+                )
+            );
+            if(!empty($duplicated_auth)) {
+                throw new Exception("Cost Center exists!");
+            }
+            foreach(array('Operation Approval', 'Finance Approval') as $approval_type) {
+                $request_id = wp_insert_post(array(
+                    'post_type'=>'auth_card',
+                    'post_title'=>'Auth Card',
+                    'post_status'=>'private'
+                ));
+                foreach($entities as $key=>$value) {
+                    if(in_array($_POST['entity'], $value)) {
+                        $entity_type = $key;
+                    }
+                    foreach($uda_approval as $approval) {
+                        if($approval->entity_type === $entity_type && $approval->uda_section === $section && $approval->approval_type === $approval_type) {
+                            $positions = $approval->approval;
+                        }
+                    }
+                }
+                add_post_meta($request_id, 'legal_entity', $_POST['entity']);
+                add_post_meta($request_id, 'entity_type', $entity_type);
+                add_post_meta($request_id, 'uda_section', $section);
+                add_post_meta($request_id, 'approval_type', $approval_type);
+                add_post_meta($request_id, 'cost_center', trim($_POST['cost-center']));
+                add_post_meta($request_id, 'cost_center_description', trim($_POST['description']));
+                foreach($positions as $position) {
+                    add_post_meta($request_id, $position, json_encode(array('')));
+                }
+                if($section === 'Non-CapEx') {
+                    $title = $approval_type === 'Operation Approval' ? 'Group CEO' : 'Group CFO';
+                    update_post_meta($request_id, $title, json_encode($company_leaders->$title));
+                }
+            }
         }
         $success = "Cost Center has been added!";
     } catch(Exception $e) {
@@ -121,11 +134,16 @@ if(isset($_POST['change-request'])) {
                         $categories = array_map(function($array) use($key) {
                             return $array[$key];
                         }, $_POST['pr'][$id]);
-                        array_push($pr_auth_level->$_POST['approval'], array($approver=>json_encode($categories)));
+                        array_push($pr_auth_level->$_POST['approval'], array($approver=>$categories));
                     }
                     update_post_meta($request_id, 'payment_auth_level', json_encode($payment_auth_level));
                     update_post_meta($request_id, 'pr_auth_level', json_encode($pr_auth_level));
                 }
+                $approvals = is_array(json_decode(get_post_meta($request_id, 'approval', true))) ? json_decode(get_post_meta($request_id, 'approval', true)) : array();
+                if(!in_array($_POST['approval'], $approvals)) {
+                    array_push($approvals, $_POST['approval']);
+                }
+                update_post_meta($request_id, 'approval', json_encode($approvals));
                 update_post_meta($request_id, 'legal_entity', $_POST['entity']); 
                 update_post_meta($request_id, 'uda_section', $_POST['uda-section']); 
                 update_post_meta($request_id, 'approval_type', $_POST['approval-type']);
@@ -251,7 +269,10 @@ $change_requests = get_posts(array(
                         </select>
                         <button type="submit" id="filter" name="filter" class="btn">Filter</button>
                     </form>
-                    <button type="button" onclick="addEntity()" class="btn btn-primary pull-right">Add Legal Entity</button>
+                    <div class="pull-right">
+                        <button type="button" onclick="addEntity()" class="btn btn-primary">Add Legal Entity</button>
+                        <button type="button" onclick="addNew()" class="btn btn-primary">Add Cost Center</button>
+                    </div>
                     <?php if(isset($_POST['filter'])) { ?>
                     <table class="table table-bordered table-view">
                         <tbody>
@@ -291,7 +312,6 @@ $change_requests = get_posts(array(
                             <?php } ?>
                         </tbody>
                     </table>
-                    <button type="button" onclick="addNew()" class="btn btn-success">Add New</button>
                     <button type="button" onclick="changeRequest()" class="btn btn-success pull-right">Change</button>                        
                     <?php } ?>
                 </div>
@@ -314,6 +334,36 @@ $change_requests = get_posts(array(
                                 <td><?=$row->uda_section?></td>
                                 <td><?=$row->approval_type?></td>
                                 <td><?=$row->cost_center?></td>
+                            </tr>
+                            <tr>
+                                <td colspan="5">
+                                    <?php foreach(json_decode($row->approval) as $approval) { ?>
+                                    <!-- <dl>
+                                        <dt>PR Authorization Level:</dt>
+                                        <dd>
+                                            <?php foreach(json_decode($row->pr_auth_level)->$approval as $item) { 
+                                                foreach(json_decode($row->$approval) as $approver) {
+                                                    print_r($item->$approver);
+                                                }   
+                                            } ?>
+                                        </dd>
+                                    </dl> -->
+                                    <dl>
+                                        <dt>Payment Authorization Level - <?=$approval?></dt>
+                                        <dd>
+                                            <?php 
+                                            $test = json_decode($row->payment_auth_level)->$approval;
+                                            $approver = array_keys((array)$test[0])[0];
+                                            echo $approver . ' : ' . $test[0]->$approver;
+                                            ?>
+                                        </dd>
+                                    </dl>
+                                    <!-- <dl>
+                                        <dt>Concur Authorization Level:</dt>
+                                        <dd><?=print_r(json_decode($row->concur_auth_level))?></dd>
+                                    </dl> -->
+                                    <?php } ?>
+                                </td>
                             </tr>
                             <?php } ?>
                         </tbody>
@@ -422,12 +472,25 @@ $change_requests = get_posts(array(
                         <input type="text" name="description" required>
                     </div>
                 </div>
-                <div>
-                    <input type="hidden" name="entity" value="<?=$_POST['entity']?>">
-                    <input type="hidden" name="entity-type" value="<?=$_POST['entity-type']?>">
-                    <input type="hidden" name="uda-section" value="<?=$_POST['uda-section']?>">
-                    <input type="hidden" name="approval-type" value="<?=$_POST['approval-type']?>">
-                    <input type="hidden" name="filter">
+                <div class="control-group">
+                    <label class="control-label">Legal Entity</label>
+                    <div class="controls">
+                        <select name="entity" required>
+                        <?php foreach($entities as $entity_type) { ?>
+                            <?php foreach($entity_type as $entity) { ?>
+                            <option value="<?=$entity?>"><?=$entity?></option>
+                            <?php } ?>
+                        <?php } ?>
+                        </select>
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label class="control-label">UDA Section</label>
+                    <div class="controls">
+                        <label><input type="checkbox" name="uda-section[]" value="CapEx"> CapEx</label>
+                        <label><input type="checkbox" name="uda-section[]" value="Non-CapEx"> Non-CapEx</label>
+                        <label><input type="checkbox" name="uda-section[]" value="Employee Expense"> Employee Expense</label>
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">
