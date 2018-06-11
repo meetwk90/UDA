@@ -338,30 +338,52 @@ $change_requests = get_posts(array(
                             <tr>
                                 <td colspan="5">
                                     <?php foreach(json_decode($row->approval) as $approval) { ?>
-                                    <!-- <dl>
-                                        <dt>PR Authorization Level:</dt>
-                                        <dd>
-                                            <?php foreach(json_decode($row->pr_auth_level)->$approval as $item) { 
-                                                foreach(json_decode($row->$approval) as $approver) {
-                                                    print_r($item->$approver);
-                                                }   
-                                            } ?>
-                                        </dd>
-                                    </dl> -->
                                     <dl>
-                                        <dt>Payment Authorization Level - <?=$approval?></dt>
+                                        <dt><?=$approval?></dt>
                                         <dd>
-                                            <?php 
-                                            $test = json_decode($row->payment_auth_level)->$approval;
-                                            $approver = array_keys((array)$test[0])[0];
-                                            echo $approver . ' : ' . $test[0]->$approver;
-                                            ?>
+                                            <?php if($row->concur_auth_level) { ?>
+                                            <dl>
+                                                <dt>Concur Authorization Level</dt>
+                                                <dd>
+                                                <?php 
+                                                $test = json_decode($row->concur_auth_level)->$approval;
+                                                foreach($test as $approver) {
+                                                    $name = array_keys((array)$approver)[0];
+                                                    echo $name . ' : ' . $approver->$name . '<br>';
+                                                }
+                                                ?>
+                                                </dd>
+                                            </dl>
+                                            <?php } else { ?>
+                                            <dl>
+                                                <dt>PR Approval Authorization Level</dt>
+                                                <dd>
+                                                <?php
+                                                foreach(json_decode($row->pr_auth_level)->$approval as $item) { 
+                                                    $name = array_keys((array)$item)[0];
+                                                    echo $name . ' : ' . '<br>';
+                                                    foreach((array)$item->$name as $category=>$value) {
+                                                        echo $category . ' -> ' . $value . '<br>';
+                                                    }
+                                                } 
+                                                ?>
+                                                </dd>
+                                            </dl>
+                                            <dl>
+                                                <dt>Payment Request Signing Authorization Level</dt>
+                                                <dd>
+                                                <?php 
+                                                $test = json_decode($row->payment_auth_level)->$approval;
+                                                foreach($test as $approver) {
+                                                    $name = array_keys((array)$approver)[0];
+                                                    echo $name . ' : ' . $approver->$name . '<br>';
+                                                }
+                                                ?>
+                                                </dd>
+                                            </dl>
+                                            <?php } ?>
                                         </dd>
                                     </dl>
-                                    <!-- <dl>
-                                        <dt>Concur Authorization Level:</dt>
-                                        <dd><?=print_r(json_decode($row->concur_auth_level))?></dd>
-                                    </dl> -->
                                     <?php } ?>
                                 </td>
                             </tr>
