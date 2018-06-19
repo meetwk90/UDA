@@ -7,6 +7,17 @@ $cost_centers = json_decode(get_option('cost_center'));
 $uda_approval = json_decode(get_option('uda_approval'));
 $company_leaders = json_decode(get_option('company_leaders'));
 
+$change_requests = get_posts(array(
+    'post_type'=>'auth_change_request',
+    'post_status'=>'private',
+    'meta_query'=>array(
+        array('key'=>'requestor_id', 'value'=>get_current_user_id()),
+        array('key'=>'status', 'value'=>'Waiting for submission')
+    ),
+    'posts_per_page'=>-1
+    )          
+);
+
 if(isset($_POST['filter'])) {
     foreach($entities as $key=>$value) {
         if(in_array($_POST['entity'], $value)) {
@@ -101,6 +112,7 @@ if(isset($_POST['change-request'])) {
                     'post_status'=>'private',
                     'meta_query'=>array(
                         array('key'=>'auth_card_id', 'value'=>$id),
+                        array('key'=>'status', 'value'=>'Pending')
                     ),
                     'posts_per_page'=>-1
                     )          
@@ -151,12 +163,43 @@ if(isset($_POST['change-request'])) {
                 update_post_meta($request_id, 'requestor_id', get_current_user_id());
                 update_post_meta($request_id, 'requestor', wp_get_current_user()->display_name);
                 update_post_meta($request_id, 'requestor_email', wp_get_current_user()->user_email);
+                update_post_meta($request_id, 'status', 'Waiting for submission');
                 update_post_meta($request_id, 'changed_date', date("Y-m-d"));  
             }
             $success = "Request has been submitted!";
         } else {
             $error = "Please log in.";
         }
+    } catch(Exception $e) {
+        $error = $e->getMessage();
+    }
+}
+
+if(isset($_POST['cancel-changes'])) {
+    try {
+        if(empty($change_requests)) {
+            throw new Exception("No changes!");
+        }
+        foreach($change_requests as $change_request) {
+            update_post_meta($change_request->ID, 'status', 'Canceled');
+        }
+        $success = "Request has been canceled!";
+    } catch(Exception $e) {
+        $error = $e->getMessage();
+    }
+}
+
+if(isset($_POST['confirm'])) {
+    try {
+        if(empty($change_requests)) {
+            throw new Exception("No changes!");
+        }
+        foreach($change_requests as $change_request) {
+            update_post_meta($change_request->ID, 'status', 'Pending for approval');
+            update_post_meta($change_request->ID, 'approver', $_POST['approver']);
+            update_post_meta($change_request->ID, 'submitted_date', date('Y-m-d'));
+        }
+        $success = "Request has been submitted!";
     } catch(Exception $e) {
         $error = $e->getMessage();
     }
@@ -180,6 +223,7 @@ $change_requests = get_posts(array(
     'post_status'=>'private',
     'meta_query'=>array(
         array('key'=>'requestor_id', 'value'=>get_current_user_id()),
+        array('key'=>'status', 'value'=>'Waiting for submission')
     ),
     'posts_per_page'=>-1
     )          
@@ -316,7 +360,11 @@ $change_requests = get_posts(array(
                     <?php } ?>
                 </div>
                 <div class="tab-pane" id="changes">
-                    <table class="table table-hover">
+                    <form method="post" class="pull-right">
+                        <button type="button" class="btn btn-primary" onclick="requestorInfo()">Fill in Requestor Information</button>
+                        <button type="submit" class="btn btn-danger" name="cancel-changes">Cancel</button>
+                    </form>
+                    <table class="table table-striped">
                         <thead>
                             <tr>
                                 <th>ID</th>
@@ -421,7 +469,7 @@ $change_requests = get_posts(array(
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn close-modal">Close</button>
-                <button type="submit" name="add-entity" class="btn btn-primary">Add Legal Entity</button>
+                <button type="submit" name="add-entity" class="btn btn-success">Submit</button>
             </div>
         </form>
     </div>
@@ -472,7 +520,7 @@ $change_requests = get_posts(array(
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn close-modal">Close</button>
-                <button type="submit" name="change-request" class="btn btn-primary">Submit</button>
+                <button type="submit" name="change-request" class="btn btn-success">Submit</button>
             </div>
         </form>
     </div>
@@ -517,7 +565,26 @@ $change_requests = get_posts(array(
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn close-modal">Close</button>
-                <button type="submit" name="add-new" class="btn btn-primary">Submit</button>
+                <button type="submit" name="add-new" class="btn btn-success">Submit</button>
+            </div>
+        </form>
+    </div>
+    <div class="requestor-info-modal modal hide fade">
+        <form method="post" class="form-horizontal">
+            <div class="modal-header">
+                <h3 class="title">Please fill in your information</h3>
+            </div>
+            <div class="modal-body">
+                <div class="control-group">
+                    <label class="control-label">Approver</label>
+                    <div class="controls">
+                        <input type="text" class="user-name" name="approver" autocomplete="off" placeholder="Name <prefix@fcagroup.com>" required />
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn close-modal">Close</button>
+                <button type="submit" name="confirm" class="btn btn-success">Submit</button>
             </div>
         </form>
     </div>
@@ -562,27 +629,9 @@ jQuery(function($) {
     window.addNew = function() {
         $('.add-new-modal').modal('show');
     }
-    // $('.table-view td').each(function() {
-    //     $this = $(this);
-    //     col = $this.index();                
-    //     txt =  $this.text();                
-    //     // row = $(this).parent()[0].rowIndex; 
-    //     span = 1;
-    //     cell_above = $($this.parent().prev().children()[col]);
-
-    //     //look for cells one above another with the same text
-    //     while(cell_above.text() === txt) {                    //if the text is the same
-    //         span += 1;                                        //increase the span
-    //         cell_above_old = cell_above;                    //store this cell
-    //         cell_above = $(cell_above.parent().prev().children()[col]);    //and go to the next cell above
-    //     }
-
-    //     //if there are at least two columns with the same value, set a new span to the first and hide the other
-    //     if(span > 1) {
-    //         $(cell_above_old).attr('rowspan', span); 
-    //         $this.hide();
-    //     }              
-    // });
+    window.requestorInfo = function() {
+        $('.requestor-info-modal').modal('show');
+    }
     $('select#cost-center-for-change-request').listbox();
     $('#approval-selected, #cost-center-for-change-request').change(function() {
         entity = $('#entity-selected').val();
@@ -605,11 +654,26 @@ jQuery(function($) {
             }
         )
     });
-    $('.btn-primary').click(function() {
+    $('.btn-success').click(function() {
         btn_submit = $(this);
         setTimeout(function() {
             btn_submit.button('reset');
         }, 5000);
+    });
+    $('.user-name').on('focus', function() {
+        $(this).siblings('.label').show(200);
+    }).on('blur', function() {
+        $(this).siblings('.label').hide(200);
+    }).typeahead({
+        source: function(query, process) {
+            $.get('<?=site_url()?>/user?s_user=' + query, function(result) {
+                process(result);
+            })
+        },
+        minLength: 2,
+        highLighter: function(item) {
+            return item;
+        } 
     });
 });
 </script>
