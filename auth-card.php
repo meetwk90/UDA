@@ -11,6 +11,7 @@ register_activation_hook(__FILE__, function() {
 	flush_rewrite_rules();
 	wp_insert_post(array('post_type'=>'page', 'post_title'=>'Authorization Card', 'post_status'=>'publish', 'post_content'=>'[auth-card]'));
 	wp_insert_post(array('post_type'=>'page', 'post_title'=>'Change Request', 'post_status'=>'publish', 'post_content'=>'[change-request]'));
+	wp_insert_post(array('post_type'=>'page', 'post_title'=>'Auth Card Approval', 'post_status'=>'publish', 'post_content'=>'[auth-card-approval]'));
 });
 
 register_deactivation_hook(__FILE__, function() {
@@ -18,6 +19,8 @@ register_deactivation_hook(__FILE__, function() {
 	$page = get_posts(array('name'=>'Authorization Card', 'post_type'=>'page'))[0];
 	wp_delete_post($page->ID, true);
 	$page = get_posts(array('name'=>'Change Request', 'post_type'=>'page'))[0];
+	wp_delete_post($page->ID, true);
+	$page = get_posts(array('name'=>'Auth Card Approval', 'post_type'=>'page'))[0];
     wp_delete_post($page->ID, true);
 });
 
@@ -34,6 +37,9 @@ add_action('init', function() {
 	});
 	add_shortcode('change-request', function() {
 		require plugin_dir_path(__FILE__) . '/change-request.php';
+	});
+	add_shortcode('auth-card-approval', function() {
+		require plugin_dir_path(__FILE__) . '/auth-card-approval.php';
 	});
 });
 

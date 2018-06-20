@@ -194,11 +194,30 @@ if(isset($_POST['confirm'])) {
         if(empty($change_requests)) {
             throw new Exception("No changes!");
         }
+        is_email(trim($_POST['approver'])) && $approver_email = trim($_POST['approver']);
+        preg_match('/\<(.*?)\>/', $_POST['approver'], $matches);
+        $matches && $approver_email = $matches[1];
+        unset($matches);
+        if(empty($approver_email)) {
+            throw new Exception("Not valid email format: " . $_POST['approver'] . ". Please use Name &lt;prefix@fcagroup.com&gt;");
+        }
+        $request_no = get_option('auth_change_request_no', 0) + 1;
+        $approval_hash = md5($request_no . $_POST['approver'] . NONCE_SALT);
         foreach($change_requests as $change_request) {
             update_post_meta($change_request->ID, 'status', 'Pending for approval');
             update_post_meta($change_request->ID, 'approver', $_POST['approver']);
+            update_post_meta($change_request->ID, 'approver_email', $approver_email);
+            update_post_meta($change_request->ID, 'request_no', $request_no);
+            update_post_meta($change_request->ID, 'approval_hash', $approval_hash);
             update_post_meta($change_request->ID, 'submitted_date', date('Y-m-d'));
         }
+        $approval_url = site_url() . '/auth-card-approval/?key=' . $approval_hash;
+        $result = apaconnect_mail($approver_email, 'uda_to_approver', array(
+            'date'=>date("Y-m-d"),
+            'request_no'=>$request_no,
+            'approval_link'=>$approval_url
+        ));
+        update_option('auth_change_request_no', $request_no);
         $success = "Request has been submitted!";
     } catch(Exception $e) {
         $error = $e->getMessage();
