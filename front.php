@@ -112,7 +112,7 @@ if(isset($_POST['change-request'])) {
                     'post_status'=>'private',
                     'meta_query'=>array(
                         array('key'=>'auth_card_id', 'value'=>$id),
-                        array('key'=>'status', 'value'=>'Pending')
+                        array('key'=>'status', 'value'=>'Waiting for submission')
                     ),
                     'posts_per_page'=>-1
                     )          
@@ -191,9 +191,11 @@ if(isset($_POST['cancel-changes'])) {
 
 if(isset($_POST['confirm'])) {
     try {
+
         if(empty($change_requests)) {
             throw new Exception("No changes!");
         }
+
         is_email(trim($_POST['approver'])) && $approver_email = trim($_POST['approver']);
         preg_match('/\<(.*?)\>/', $_POST['approver'], $matches);
         $matches && $approver_email = $matches[1];
@@ -201,24 +203,61 @@ if(isset($_POST['confirm'])) {
         if(empty($approver_email)) {
             throw new Exception("Not valid email format: " . $_POST['approver'] . ". Please use Name &lt;prefix@fcagroup.com&gt;");
         }
-        $request_no = get_option('auth_change_request_no', 0) + 1;
-        $approval_hash = md5($request_no . $_POST['approver'] . NONCE_SALT);
-        foreach($change_requests as $change_request) {
-            update_post_meta($change_request->ID, 'status', 'Pending for approval');
-            update_post_meta($change_request->ID, 'approver', $_POST['approver']);
-            update_post_meta($change_request->ID, 'approver_email', $approver_email);
-            update_post_meta($change_request->ID, 'request_no', $request_no);
-            update_post_meta($change_request->ID, 'approval_hash', $approval_hash);
-            update_post_meta($change_request->ID, 'submitted_date', date('Y-m-d'));
+
+        is_email(trim($_POST['requestor'])) && $requestor_email = trim($_POST['requestor']);
+        preg_match('/\<(.*?)\>/', $_POST['requestor'], $matches);
+        $matches && $requestor_email = $matches[1];
+        unset($matches);
+        if(empty($requestor_email)) {
+            throw new Exception("Not valid email format: " . $_POST['requestor'] . ". Please use Name &lt;prefix@fcagroup.com&gt;");
         }
+
+        $request_no = get_option('auth_change_request_no', 0) + 1;
+        $approval_hash = md5($request_no . $_POST['requestor'] . NONCE_SALT);
+
         $approval_url = site_url() . '/auth-card-approval/?key=' . $approval_hash;
         $result = apaconnect_mail($approver_email, 'uda_to_approver', array(
             'date'=>date("Y-m-d"),
             'request_no'=>$request_no,
+            'requestor'=>$_POST['requestor'],
+            'approver'=>$_POST['approver'],
+            'entity'=>$_POST['entity'],
+            'comments'=>$_POST['comments'],
             'approval_link'=>$approval_url
         ));
-        update_option('auth_change_request_no', $request_no);
-        $success = "Request has been submitted!";
+
+        if($result) {
+
+            update_option('auth_change_request_no', $request_no);
+            
+            $request_id = wp_insert_post(array(
+                'post_type'=>'auth_card_request',
+                'post_title'=>'Auth Card Request No. ' . $request_no,
+                'post_status'=>'private'
+            ));
+
+            $change_requests_id = array();
+            foreach($change_requests as $change_request) {
+                array_push($change_requests_id, $change_request->ID);
+                update_post_meta($change_request->ID, 'status', 'Pending for approval');
+            }
+            update_post_meta($request_id, 'change_requests_id', json_encode($change_requests_id));
+            update_post_meta($request_id, 'approver', $_POST['approver']);
+            update_post_meta($request_id, 'approver_email', $approver_email);
+            update_post_meta($request_id, 'requestor', $_POST['requestor']);
+            update_post_meta($request_id, 'requestor_email', $requestor_email);
+            update_post_meta($request_id, 'entity', $_POST['entity']);
+            update_post_meta($request_id, 'request_no', $request_no);
+            update_post_meta($request_id, 'approval_hash', $approval_hash);
+            update_post_meta($request_id, 'submitted_date', date('Y-m-d'));
+            update_post_meta($request_id, 'status', 'Pending for approval');
+
+            $success = "Request has been submitted!";
+            
+        } else {
+            throw new Exception("Fail to send email to " . $_POST['requestor']);
+        }
+        
     } catch(Exception $e) {
         $error = $e->getMessage();
     }
@@ -595,9 +634,33 @@ $change_requests = get_posts(array(
             </div>
             <div class="modal-body">
                 <div class="control-group">
+                    <label class="control-label">Requestor</label>
+                    <div class="controls">
+                        <input type="text" class="user-name" name="requestor" autocomplete="off" placeholder="Name <prefix@fcagroup.com>" required />
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label class="control-label">Legal Entity</label>
+                    <div class="controls">
+                        <select name="entity" required>
+                        <?php foreach($entities as $entity_type) { ?>
+                            <?php foreach($entity_type as $entity) { ?>
+                            <option value="<?=$entity?>"><?=$entity?></option>
+                            <?php } ?>
+                        <?php } ?>
+                        </select>
+                    </div>
+                </div>
+                <div class="control-group">
                     <label class="control-label">Approver</label>
                     <div class="controls">
                         <input type="text" class="user-name" name="approver" autocomplete="off" placeholder="Name <prefix@fcagroup.com>" required />
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label class="control-label">Comments</label>
+                    <div class="controls">
+                        <textarea name="comments"></textarea>
                     </div>
                 </div>
             </div>
