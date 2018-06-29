@@ -1,4 +1,6 @@
 <?php
+$ICT_team = json_decode(get_option("UDA_ICT_team"));
+
 $auth_card_request = get_posts(array(
     'post_type'=>'auth_card_request',
     'post_status'=>'private',
@@ -24,25 +26,180 @@ if(empty($auth_card_request)) {
 
 if(isset($_POST['status'])) {
     try {
-        $status = $_POST['status'] === 'reject' ? 'Rejected by Approver' : 'Pending for Compliance verification';
-        update_post_meta($auth_card_request->ID, 'status', $status);
+        if($auth_card_request->status === 'Pending for approval') {
 
-        $result = apaconnect_mail($auth_card_request->requestor_email, 'uda_to_requestor', array(
+            $status = $_POST['status'] === 'reject' ? 'Rejected by Approver' : 'Pending for Compliance verification';
+
+            if($_POST['status'] === 'approve') {
+
+                $approval_hash = md5($auth_card_request->request_no . get_option('compliance_email') . NONCE_SALT);
+                $approval_url = site_url() . '/auth-card-approval/?key=' . $approval_hash;
+
+                $result_to_compliance = apaconnect_mail(get_option('compliance_email'), 'uda_to_compliance', array(
+                    'request_no'=>$auth_card_request->request_no,
+                    'requestor'=>$auth_card_request->requestor,
+                    'approver'=>$auth_card_request->approver,
+                    'entity'=>$auth_card_request->entity,
+                    'comments'=>$_POST['comments'],
+                    'status'=>$status,
+                    'approval_link'=>$approval_url,
+                    'date'=>$auth_card_request->submitted_date
+                ));
+            
+                if($result_to_compliance) {
+                    update_post_meta($auth_card_request->ID, 'approval_hash', $approval_hash);
+                } else {
+                    throw new Exception("Fail to send email to " . get_option('compliance_email'));
+                }
+
+            } else {
+                delete_post_meta($auth_card_request->ID, 'approval_hash');
+            }
+            
+            $result_to_requestor = apaconnect_mail($auth_card_request->requestor_email, 'uda_to_requestor', array(
+                'request_no'=>$auth_card_request->request_no,
+                'requestor'=>$auth_card_request->requestor,
+                'approver'=>$auth_card_request->approver,
+                'entity'=>$auth_card_request->entity,
+                'comments'=>$_POST['comments'],
+                'status'=>$status,
+                'date'=>$auth_card_request->submitted_date
+            ), false);
+
+            if($result_to_requestor) {
+                update_post_meta($auth_card_request->ID, 'status', $status);
+                $success = "Request has been " . $status;
+            } else {
+                throw new Exception("Fail to send email to " . $auth_card_request->requestor);
+            }
+        
+        } elseif($auth_card_request->status === 'Pending for Compliance verification') {
+
+            $status = $_POST['status'] === 'reject' ? 'Rejected by Compliance' : 'Pending for system change';
+
+            if($_POST['status'] === 'approve') {
+
+                $approval_hash = md5($auth_card_request->request_no . $ICT_team->Concur . $ICT_team->SAP . NONCE_SALT);
+                $approval_url = site_url() . '/auth-card-approval/?key=' . $approval_hash;
+
+                foreach($change_requests as $change_request) {
+                    if($change_request->concur_auth_level) {
+                        $concur_change = true;
+                    }
+                    if($change_request->pr_auth_level) {
+                        $sap_change = true;
+                    }
+                }
+
+                if($concur_change) {
+                    $result_to_concur = apaconnect_mail($ICT_team->Concur, 'uda_to_ict', array(
+                        'request_no'=>$auth_card_request->request_no,
+                        'requestor'=>$auth_card_request->requestor,
+                        'approver'=>$auth_card_request->approver,
+                        'entity'=>$auth_card_request->entity,
+                        'status'=>$status,
+                        'approval_link'=>$approval_url,
+                        'date'=>$auth_card_request->submitted_date
+                    ), false);
+
+                    if(!$result_to_concur) {
+                        throw new Exception("Fail to send email to " . $ICT_team->Concur);
+                    }
+                } else {
+                    update_post_meta($auth_card_request->ID, 'job_status_Concur', 'No system change required');
+                }
+
+                if($sap_change) {
+                    $result_to_sap = apaconnect_mail($ICT_team->SAP, 'uda_to_ict', array(
+                        'request_no'=>$auth_card_request->request_no,
+                        'requestor'=>$auth_card_request->requestor,
+                        'approver'=>$auth_card_request->approver,
+                        'entity'=>$auth_card_request->entity,
+                        'status'=>$status,
+                        'approval_link'=>$approval_url,
+                        'date'=>$auth_card_request->submitted_date
+                    ), false);
+
+                    if(!$result_to_sap) {
+                        throw new Exception("Fail to send email to " . $ICT_team->SAP);
+                    }
+                } else {
+                    update_post_meta($auth_card_request->ID, 'job_status_SAP', 'No system change required');
+                }
+
+                update_post_meta($auth_card_request->ID, 'approval_hash', $approval_hash);
+
+            } else {
+                delete_post_meta($auth_card_request->ID, 'approval_hash');
+            }
+
+            $result_to_requestor = apaconnect_mail($auth_card_request->requestor_email, 'uda_to_requestor', array(
+                'request_no'=>$auth_card_request->request_no,
+                'requestor'=>$auth_card_request->requestor,
+                'approver'=>$auth_card_request->approver,
+                'entity'=>$auth_card_request->entity,
+                'comments'=>$_POST['comments'],
+                'status'=>$status,
+                'date'=>$auth_card_request->submitted_date
+            ), false);
+
+            update_post_meta($auth_card_request->ID, 'status', $status);
+            $success = "Request has been " . $status;
+
+        }
+    } catch(Exception $e) {
+        $error = $e->getMessage();
+    }
+}
+
+if(isset($_POST['proceed'])) {
+    try {
+
+        update_post_meta($auth_card_request->ID, 'job_status_' . $_POST['type'], $_POST['job-status']);
+        
+        if($_POST['job-status'] === 'System change completed') {
+
+            include_once ABSPATH . 'wp-admin/includes/media.php';
+            include_once ABSPATH . 'wp-admin/includes/file.php';
+            include_once ABSPATH . 'wp-admin/includes/image.php';
+
+            $attachment_id = media_handle_upload('attachment', 0);
+
+            if(is_wp_error($attachment_id)) {
+                throw new Exception("Failed to upload signature: " . $attachment_id->get_errer_message());
+            }
+
+            update_post_meta($auth_card_request->ID, $_POST['type'] . '_attachment_id', $attachment_id);
+
+        }
+
+        $approval_hash = get_post_meta($auth_card_request->ID, 'approval_hash', true);
+        $approval_url = site_url() . '/auth-card-approval/?key=' . $approval_hash;
+
+        $result_to_wcf = apaconnect_mail($ICT_team->WCF, 'uda_to_ict', array(
             'request_no'=>$auth_card_request->request_no,
             'requestor'=>$auth_card_request->requestor,
             'approver'=>$auth_card_request->approver,
             'entity'=>$auth_card_request->entity,
-            'comments'=>$_POST['comments'],
             'status'=>$status,
+            'approval_link'=>$approval_url,
             'date'=>$auth_card_request->submitted_date
         ), false);
 
-        if($result) {
-            delete_post_meta($auth_card_request->ID, 'approval_hash');
-            $success = "Request has been " . $status;
-        } else {
-            throw new Exception("Fail to send email to " . $auth_card_request->requestor);
+    } catch(Exception $e) {
+        $error = $e->getMessage();
+    }
+}
+
+if(isset($_POST['finish'])) {
+    try {
+
+        foreach($change_requests as $change_request) {
+            foreach(json_decode($change_request->approval) as $position) {
+                update_post_meta($change_request->auth_card_id, $position, $change_request->$position);
+            }
         }
+
     } catch(Exception $e) {
         $error = $e->getMessage();
     }
@@ -62,9 +219,13 @@ if(isset($_POST['status'])) {
         <?php } ?>
         <?php if(!$success && !$error) { ?>
 		<div class="row-fluid">
-            <div class="pull-right">
-                <button type="button" onclick="proceedApproval()" class="btn btn-primary">Proceed Approval</button>
-            </div>
+            <a href="<?=wp_get_attachment_url(get_post_meta($auth_card_request->ID, 'signature_id', true))?>" target="_blank" class="btn">Requestor Signature</a>
+            <?php if(get_post_meta($auth_card_request->ID, 'SAP_attachment_id', true)) { ?>
+            <a href="<?=wp_get_attachment_url(get_post_meta($auth_card_request->ID, 'SAP_attachment_id', true))?>" target="_blank" class="btn">SAP Attachment</a>
+            <?php } if(get_post_meta($auth_card_request->ID, 'Concur_attachment_id', true)) { ?>
+            <a href="<?=wp_get_attachment_url(get_post_meta($auth_card_request->ID, 'Concur_attachment_id', true))?>" target="_blank" class="btn">Concur Attachment</a>
+            <?php } ?>
+            <button type="button" onclick="proceedApproval()" class="btn btn-primary pull-right">Proceed Approval</button>
             <table class="table table-striped">
                 <thead>
                     <tr>
@@ -146,11 +307,38 @@ if(isset($_POST['status'])) {
 
 <div class="modal-container">
     <div class="proceed-approval-modal modal hide fade">
-        <form method="post" class="form-horizontal" style="margin-bottom:0">
+        <form method="post" class="form-horizontal" style="margin-bottom:0" enctype="multipart/form-data">
             <div class="modal-header">
                 <h3 class="title">Proceed Approval</h3>
             </div>
             <div class="modal-body">
+                <?php if(wp_get_current_user()->user_email != $ICT_team->WCF) { ?>
+                    <?php if($auth_card_request->status === 'Pending for system change') { ?>
+                <div class="control-group">
+                    <label class="control-label">Type</label>
+                    <div class="controls">
+                        <label><input type="radio" name="type" value="SAP" checked> SAP</label>
+                        <label><input type="radio" name="type" value="Concur"> Concur</label>
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label class="control-label">Job Status</label>
+                    <div class="controls">
+                        <select name="job-status" id="job-status">
+                            <option value="System change completed">System change completed</option>
+                            <option value="No system change required">No system change required</option>
+                            <option value="Pending for more information from business">Pending for more information from business</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="control-group" id="attachment">
+                    <label class="control-label">Attachment</label>
+                    <div class="controls">
+                        <input type="file" name="attachment" required />
+                    </div>
+                </div>
+                    <?php } ?>
+                <?php } ?>
                 <div class="control-group">
                     <label class="control-label">Comments</label>
                     <div class="controls">
@@ -160,8 +348,16 @@ if(isset($_POST['status'])) {
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn close-modal">Close</button>
+                <?php if($auth_card_request->status === 'Pending for system change') { ?>
+                    <?php if(wp_get_current_user()->user_email == $ICT_team->WCF) { ?>
+                <button type="submit" name="finish" class="btn btn-success">Finish</button>
+                    <?php } else { ?>
+                <button type="submit" name="proceed" class="btn btn-success">Proceed</button>
+                    <?php } ?>
+                <?php } else { ?>
                 <button type="submit" name="status" value="reject" class="btn btn-danger">Reject</button>
                 <button type="submit" name="status" value="approve" class="btn btn-success">Approve</button>
+                <?php } ?>
             </div>
         </form>
     </div>
@@ -175,5 +371,20 @@ jQuery(function($) {
     window.proceedApproval = function() {
         $('.proceed-approval-modal').modal('show');
     }
+    $('#job-status').change(function() {
+        if($(this).val() !== 'System change completed') {
+            $('#attachment').hide();
+            $('#attachment input').attr('required', false);
+        } else {
+            $('#attachment').show();
+            $('#attachment input').attr('required', true);
+        }
+    });
+    $('.btn-success').click(function() {
+        btn_submit = $(this);
+        setTimeout(function() {
+            btn_submit.button('reset');
+        }, 5000);
+    });
 });
 </script>

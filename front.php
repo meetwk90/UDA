@@ -228,6 +228,16 @@ if(isset($_POST['confirm'])) {
 
         if($result) {
 
+            include_once ABSPATH . 'wp-admin/includes/media.php';
+            include_once ABSPATH . 'wp-admin/includes/file.php';
+            include_once ABSPATH . 'wp-admin/includes/image.php';
+
+            $attachment_id = media_handle_upload('signature', 0);
+
+            if(is_wp_error($attachment_id)) {
+                throw new Exception("Failed to upload signature: " . $attachment_id->get_errer_message());
+            }
+
             update_option('auth_change_request_no', $request_no);
             
             $request_id = wp_insert_post(array(
@@ -242,6 +252,7 @@ if(isset($_POST['confirm'])) {
                 update_post_meta($change_request->ID, 'status', 'Pending for approval');
             }
             update_post_meta($request_id, 'change_requests_id', json_encode($change_requests_id));
+            update_post_meta($request_id, 'signature_id', $attachment_id);
             update_post_meta($request_id, 'approver', $_POST['approver']);
             update_post_meta($request_id, 'approver_email', $approver_email);
             update_post_meta($request_id, 'requestor', $_POST['requestor']);
@@ -418,10 +429,12 @@ $change_requests = get_posts(array(
                     <?php } ?>
                 </div>
                 <div class="tab-pane" id="changes">
+                    <?php if(count($change_requests) > 0) { ?>
                     <form method="post" class="pull-right">
                         <button type="button" class="btn btn-primary" onclick="requestorInfo()">Fill in Requestor Information</button>
                         <button type="submit" class="btn btn-danger" name="cancel-changes">Cancel</button>
                     </form>
+                    <?php } ?>
                     <table class="table table-striped">
                         <thead>
                             <tr>
@@ -628,7 +641,7 @@ $change_requests = get_posts(array(
         </form>
     </div>
     <div class="requestor-info-modal modal hide fade">
-        <form method="post" class="form-horizontal">
+        <form method="post" class="form-horizontal" enctype="multipart/form-data">
             <div class="modal-header">
                 <h3 class="title">Please fill in your information</h3>
             </div>
@@ -661,6 +674,12 @@ $change_requests = get_posts(array(
                     <label class="control-label">Comments</label>
                     <div class="controls">
                         <textarea name="comments"></textarea>
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label class="control-label">Signature Upload</label>
+                    <div class="controls">
+                        <input type="file" name="signature" required />
                     </div>
                 </div>
             </div>
