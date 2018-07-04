@@ -26,6 +26,7 @@ if(empty($auth_card_request)) {
 
 if(isset($_POST['status'])) {
     try {
+
         if($auth_card_request->status === 'Pending for approval') {
 
             $status = $_POST['status'] === 'reject' ? 'Rejected by Approver' : 'Pending for Compliance verification';
@@ -194,17 +195,64 @@ if(isset($_POST['proceed'])) {
 if(isset($_POST['finish'])) {
     try {
 
+        /* update master table */
         foreach($change_requests as $change_request) {
             foreach(json_decode($change_request->approval) as $position) {
                 update_post_meta($change_request->auth_card_id, $position, $change_request->$position);
+                foreach(json_decode($change_request->$position) as $approver) {
+                    if($change_request->payment_auth_level) {
+                        foreach(json_decode($change_request->payment_auth_level)->$position as $item) {
+                            if(key((array) $item) === $approver) {
+                                update_post_meta($change_request->auth_card_id, 'payment_auth_level-' . $approver, $item->$approver);
+                            }
+                        }
+                    }
+                    if($change_request->pr_auth_level) {
+                        foreach(json_decode($change_request->pr_auth_level)->$position as $item) {
+                            if(key((array) $item) === $approver) {
+                                update_post_meta($change_request->auth_card_id, 'pr_auth_level-' . $approver, json_encode($item->$approver));
+                            }
+                        }
+                    }
+                    if($change_request->concur_auth_level) {
+                        foreach(json_decode($change_request->concur_auth_level)->$position as $item) {
+                            if(key((array) $item) === $approver) {
+                                update_post_meta($change_request->auth_card_id, 'concur_auth_level-' . $approver, $item->$approver);
+                            }
+                        }
+                    }
+                }
             }
         }
+
+        $status = 'Finished';
+        update_post_meta($auth_card_request->ID, 'status', $status);
+        delete_post_meta($auth_card_request->ID, 'approval_hash');
+
+        apaconnect_mail($auth_card_request->requestor_email, 'uda_to_requestor', array(
+            'request_no'=>$auth_card_request->request_no,
+            'requestor'=>$auth_card_request->requestor,
+            'approver'=>$auth_card_request->approver,
+            'entity'=>$auth_card_request->entity,
+            'comments'=>$_POST['comments'],
+            'status'=>$status,
+            'date'=>$auth_card_request->submitted_date
+        ), false);
+
+        $success = "Request has been finished.";
 
     } catch(Exception $e) {
         $error = $e->getMessage();
     }
 }
 ?>
+
+<style>
+.control-group {
+    display: inline-block;
+    margin-right: 50px;
+}
+</style>
 
 <div class="site-content box" role="main">
 	<header>
@@ -219,13 +267,30 @@ if(isset($_POST['finish'])) {
         <?php } ?>
         <?php if(!$success && !$error) { ?>
 		<div class="row-fluid">
-            <a href="<?=wp_get_attachment_url(get_post_meta($auth_card_request->ID, 'signature_id', true))?>" target="_blank" class="btn">Requestor Signature</a>
-            <?php if(get_post_meta($auth_card_request->ID, 'SAP_attachment_id', true)) { ?>
-            <a href="<?=wp_get_attachment_url(get_post_meta($auth_card_request->ID, 'SAP_attachment_id', true))?>" target="_blank" class="btn">SAP Attachment</a>
-            <?php } if(get_post_meta($auth_card_request->ID, 'Concur_attachment_id', true)) { ?>
-            <a href="<?=wp_get_attachment_url(get_post_meta($auth_card_request->ID, 'Concur_attachment_id', true))?>" target="_blank" class="btn">Concur Attachment</a>
-            <?php } ?>
             <button type="button" onclick="proceedApproval()" class="btn btn-primary pull-right">Proceed Approval</button>
+            <div class="form-horizontal">
+                <div class="control-group">
+                    <label class="control-label">Requestor Signature</label>
+                    <div class="controls">
+                        <a href="<?=wp_get_attachment_url(get_post_meta($auth_card_request->ID, 'signature_id', true))?>" target="_blank"><?=get_the_title(get_post_meta($auth_card_request->ID, 'signature_id', true))?></a>
+                    </div>
+                </div>
+                <?php if(get_post_meta($auth_card_request->ID, 'SAP_attachment_id', true)) { ?>
+                <div class="control-group">
+                    <label class="control-label">SAP Attachment</label>
+                    <div class="controls">
+                        <a href="<?=wp_get_attachment_url(get_post_meta($auth_card_request->ID, 'SAP_attachment_id', true))?>" target="_blank"><?=get_the_title(get_post_meta($auth_card_request->ID, 'SAP_attachment_id', true))?></a>
+                    </div>
+                </div>
+                <?php } if(get_post_meta($auth_card_request->ID, 'Concur_attachment_id', true)) { ?>
+                <div class="control-group">
+                    <label class="control-label">Concur Attachment</label>
+                    <div class="controls">
+                        <a href="<?=wp_get_attachment_url(get_post_meta($auth_card_request->ID, 'Concur_attachment_id', true))?>" target="_blank"><?=get_the_title(get_post_meta($auth_card_request->ID, 'Concur_attachment_id', true))?></a>
+                    </div>
+                </div>
+                <?php } ?>
+            </div>
             <table class="table table-striped">
                 <thead>
                     <tr>
@@ -365,12 +430,15 @@ if(isset($_POST['finish'])) {
 
 <script>
 jQuery(function($) {
+
     $('.modal-container').on('click', 'button.close-modal', function() {
 		$(this).closest('.modal').modal('hide');
 	});
+
     window.proceedApproval = function() {
         $('.proceed-approval-modal').modal('show');
     }
+
     $('#job-status').change(function() {
         if($(this).val() !== 'System change completed') {
             $('#attachment').hide();
@@ -380,11 +448,13 @@ jQuery(function($) {
             $('#attachment input').attr('required', true);
         }
     });
+
     $('.btn-success').click(function() {
         btn_submit = $(this);
         setTimeout(function() {
             btn_submit.button('reset');
         }, 5000);
     });
+    
 });
 </script>

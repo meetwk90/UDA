@@ -13,6 +13,7 @@ $auth_cards = get_posts(array(
     )
 );
 ?>
+
 <div class="change-content">
     <?php foreach($auth_cards as $auth_card) { ?>
     <input type="hidden" name="ID[]" value="<?=$auth_card->ID?>" />
@@ -136,21 +137,26 @@ $auth_cards = get_posts(array(
     <input type="hidden" name="uda-section" value="<?=$_POST['section']?>">
     <script>
     jQuery(function($) {
+
         $('.edit-approver').click(function() {
             $(this).prev().attr('readonly', false).next().next().show();
             $(this).remove();
         });
+
         $('.edit-payment, .edit-concur, .edit-pr-approval').click(function() {
             $(this).prev().children().attr('readonly', false);
             $(this).remove();
         });
+
         $('.table').on('click', '.add-approver', function() {
             cloned = $(this).closest('.section');
             cloned.clone().find('.editable').val('').attr('readonly', false).end().find('.edit-approver, .edit-payment, .edit-concur, .edit-pr-approval').hide().end().insertAfter(cloned);
         });
+
         $('.table').on('click', '.remove-approver', function() {
             $(this).closest('.section').remove();
         });
+        
     });
     </script>
 </div>

@@ -1,6 +1,4 @@
 <?php 
-// ini_set('display_errors', true);
-// error_reporting(E_ALL);
 
 $entities = json_decode(get_option('legal_entity'));
 $cost_centers = json_decode(get_option('cost_center'));
@@ -19,31 +17,38 @@ $change_requests = get_posts(array(
 );
 
 if(isset($_POST['filter'])) {
+
     foreach($entities as $key=>$value) {
         if(in_array($_POST['entity'], $value)) {
             $_POST['entity-type'] = $key;
         }
     }
+
     foreach($uda_approval as $approval) {
         if($approval->entity_type === $_POST['entity-type'] && $approval->uda_section === $_POST['uda-section'] && $approval->approval_type === $_POST['approval-type']) {
             $positions = $approval->approval;
         }
     }
+
 }
 
 if(isset($_POST['add-entity'])) {
     try {
+
         $entity = trim($_POST['entity']);
         $entity_type = $_POST['entity-type'];
         is_object($entities) ? $entities : $entities->$entity_type = array();
         is_array($entities->$entity_type) ? $entities->$entity_type : $entities->$entity_type = array();
+        
         if(in_array($entity, $entities->$entity_type)) {
             throw new Exception("Entity exists!");
         } else {
             array_push($entities->$entity_type, $entity);
             update_option('legal_entity', json_encode($entities));
         }
+
         $success = "Legal Entity has been added.";
+
     } catch(Exception $e) {
         $error = $e->getMessage();
     }
@@ -51,7 +56,9 @@ if(isset($_POST['add-entity'])) {
 
 if(isset($_POST['add-new'])) {
     try {
+
         foreach($_POST['uda-section'] as $section) {
+
             $duplicated_auth = get_posts(array(
                 'post_type'=>'auth_card',
                 'post_status'=>'private',
@@ -63,41 +70,55 @@ if(isset($_POST['add-new'])) {
                 'posts_per_page'=>-1
                 )
             );
+
             if(!empty($duplicated_auth)) {
                 throw new Exception("Cost Center exists!");
             }
+
             foreach(array('Operation Approval', 'Finance Approval') as $approval_type) {
+                
                 $request_id = wp_insert_post(array(
                     'post_type'=>'auth_card',
                     'post_title'=>'Auth Card',
                     'post_status'=>'private'
                 ));
+
                 foreach($entities as $key=>$value) {
+
                     if(in_array($_POST['entity'], $value)) {
                         $entity_type = $key;
                     }
+
                     foreach($uda_approval as $approval) {
                         if($approval->entity_type === $entity_type && $approval->uda_section === $section && $approval->approval_type === $approval_type) {
                             $positions = $approval->approval;
                         }
                     }
+
                 }
+
                 add_post_meta($request_id, 'legal_entity', $_POST['entity']);
                 add_post_meta($request_id, 'entity_type', $entity_type);
                 add_post_meta($request_id, 'uda_section', $section);
                 add_post_meta($request_id, 'approval_type', $approval_type);
                 add_post_meta($request_id, 'cost_center', trim($_POST['cost-center']));
                 add_post_meta($request_id, 'cost_center_description', trim($_POST['description']));
+                
                 foreach($positions as $position) {
                     add_post_meta($request_id, $position, json_encode(array('')));
                 }
+
                 if($section === 'Non-CapEx') {
                     $title = $approval_type === 'Operation Approval' ? 'Group CEO' : 'Group CFO';
                     update_post_meta($request_id, $title, json_encode($company_leaders->$title));
                 }
+
             }
+
         }
+
         $success = "Cost Center has been added!";
+
     } catch(Exception $e) {
         $error = $e->getMessage();
     }
@@ -105,8 +126,11 @@ if(isset($_POST['add-new'])) {
 
 if(isset($_POST['change-request'])) {
     try {
-        if(is_user_logged_in()) {      
+
+        if(is_user_logged_in()) {    
+
             foreach($_POST['ID'] as $id) {
+
                 $existing_request = get_posts(array(
                     'post_type'=>'auth_change_request',
                     'post_status'=>'private',
@@ -117,6 +141,7 @@ if(isset($_POST['change-request'])) {
                     'posts_per_page'=>-1
                     )          
                 )[0];
+
                 if($existing_request) {
                     $request_id = $existing_request->ID;
                 } else {
@@ -126,35 +151,50 @@ if(isset($_POST['change-request'])) {
                         'post_status'=>'private'
                     ));
                 }
+
                 update_post_meta($request_id, 'auth_card_id', $id);
                 $approvers = is_array($_POST['approver'][$id]) ? $_POST['approver'][$id] : array('');
                 update_post_meta($request_id, $_POST['approval'], json_encode($approvers));
+                
                 if($_POST['uda-section'] === 'Employee Expense') {
+
                     $concur_auth_level = json_decode(get_post_meta($request_id, 'concur_auth_level', true));
                     $concur_auth_level->$_POST['approval'] = array();
+                    
                     foreach($_POST['approver'][$id] as $key=>$approver) {
                         array_push($concur_auth_level->$_POST['approval'], array($approver=>$_POST['concur'][$id][$key]));                      
                     }
+
                     update_post_meta($request_id, 'concur_auth_level', json_encode($concur_auth_level));
+                
                 } else {
+
                     $payment_auth_level = json_decode(get_post_meta($request_id, 'payment_auth_level', true));
                     $payment_auth_level->$_POST['approval'] = array();
                     $pr_auth_level = json_decode(get_post_meta($request_id, 'pr_auth_level', true));
                     $pr_auth_level->$_POST['approval'] = array();
+                    
                     foreach($_POST['approver'][$id] as $key=>$approver) {
+
                         array_push($payment_auth_level->$_POST['approval'], array($approver=>$_POST['payment'][$id][$key])); 
+                        
                         $categories = array_map(function($array) use($key) {
                             return $array[$key];
                         }, $_POST['pr'][$id]);
+
                         array_push($pr_auth_level->$_POST['approval'], array($approver=>$categories));
                     }
+
                     update_post_meta($request_id, 'payment_auth_level', json_encode($payment_auth_level));
                     update_post_meta($request_id, 'pr_auth_level', json_encode($pr_auth_level));
+                
                 }
+
                 $approvals = is_array(json_decode(get_post_meta($request_id, 'approval', true))) ? json_decode(get_post_meta($request_id, 'approval', true)) : array();
                 if(!in_array($_POST['approval'], $approvals)) {
                     array_push($approvals, $_POST['approval']);
                 }
+
                 update_post_meta($request_id, 'approval', json_encode($approvals));
                 update_post_meta($request_id, 'legal_entity', $_POST['entity']); 
                 update_post_meta($request_id, 'uda_section', $_POST['uda-section']); 
@@ -165,11 +205,15 @@ if(isset($_POST['change-request'])) {
                 update_post_meta($request_id, 'requestor_email', wp_get_current_user()->user_email);
                 update_post_meta($request_id, 'status', 'Waiting for submission');
                 update_post_meta($request_id, 'changed_date', date("Y-m-d"));  
+            
             }
+
             $success = "Request has been submitted!";
+
         } else {
             $error = "Please log in.";
         }
+
     } catch(Exception $e) {
         $error = $e->getMessage();
     }
@@ -177,13 +221,17 @@ if(isset($_POST['change-request'])) {
 
 if(isset($_POST['cancel-changes'])) {
     try {
+
         if(empty($change_requests)) {
             throw new Exception("No changes!");
         }
+
         foreach($change_requests as $change_request) {
             update_post_meta($change_request->ID, 'status', 'Canceled');
         }
+
         $success = "Request has been canceled!";
+
     } catch(Exception $e) {
         $error = $e->getMessage();
     }
@@ -200,6 +248,7 @@ if(isset($_POST['confirm'])) {
         preg_match('/\<(.*?)\>/', $_POST['approver'], $matches);
         $matches && $approver_email = $matches[1];
         unset($matches);
+
         if(empty($approver_email)) {
             throw new Exception("Not valid email format: " . $_POST['approver'] . ". Please use Name &lt;prefix@fcagroup.com&gt;");
         }
@@ -208,6 +257,7 @@ if(isset($_POST['confirm'])) {
         preg_match('/\<(.*?)\>/', $_POST['requestor'], $matches);
         $matches && $requestor_email = $matches[1];
         unset($matches);
+
         if(empty($requestor_email)) {
             throw new Exception("Not valid email format: " . $_POST['requestor'] . ". Please use Name &lt;prefix@fcagroup.com&gt;");
         }
@@ -365,11 +415,11 @@ $change_requests = get_posts(array(
                 <div class="tab-pane active" id="master">
                     <form method="post" class="form-inline pull-left">
                         <select name="entity" id="entity-selected">
-                            <?php foreach($entities as $entity_type) { ?>
-                                <?php foreach($entity_type as $entity) { ?>
-                                <option value="<?=$entity?>" <?php if(isset($_POST['filter']) && $_POST['entity'] === $entity) { ?>selected<?php } ?>><?=$entity?></option>
-                                <?php } ?>
+                        <?php foreach($entities as $entity_type) { ?>
+                            <?php foreach($entity_type as $entity) { ?>
+                            <option value="<?=$entity?>" <?php if(isset($_POST['filter']) && $_POST['entity'] === $entity) { ?>selected<?php } ?>><?=$entity?></option>
                             <?php } ?>
+                        <?php } ?>
                         </select>
                         <select name="uda-section" id="uda-section-selected">
                             <option value="CapEx" <?php if(isset($_POST['filter']) && $_POST['uda-section'] === 'CapEx') { ?>selected<?php } ?>>CapEx</option>
@@ -693,15 +743,18 @@ $change_requests = get_posts(array(
 
 <script>
 jQuery(function($) {
+
     $('.modal-container').on('click', 'button.close-modal', function() {
 		$(this).closest('.modal').modal('hide');
 	});
+
     $('input.date').datetimepicker({
         autoclose: true,
         startView: 'month',
         minView: 'month',
         format: 'yyyy-mm-dd'
     });
+
     $('.user-name').on('focus', function() {
 		$(this).siblings('.label').show(200);
 	}).on('blur', function() {
@@ -717,23 +770,30 @@ jQuery(function($) {
 			return item;
 		}
 	});
+
     window.addEntity = function() {
         $('.add-entity-modal').modal('show');
     }
+
     window.changeRequest = function() {
         $('.request-modal').modal('show');
     }
+
     window.changeRequestDetail = function() {
         $('.request-modal').modal('hide');
         $('.change-request-modal').modal('show');
     }
+
     window.addNew = function() {
         $('.add-new-modal').modal('show');
     }
+
     window.requestorInfo = function() {
         $('.requestor-info-modal').modal('show');
     }
+
     $('select#cost-center-for-change-request').listbox();
+
     $('#approval-selected, #cost-center-for-change-request').change(function() {
         entity = $('#entity-selected').val();
         uda_section = $('#uda-section-selected').val();
@@ -755,12 +815,14 @@ jQuery(function($) {
             }
         )
     });
+
     $('.btn-success').click(function() {
         btn_submit = $(this);
         setTimeout(function() {
             btn_submit.button('reset');
         }, 5000);
     });
+
     $('.user-name').on('focus', function() {
         $(this).siblings('.label').show(200);
     }).on('blur', function() {
@@ -776,5 +838,6 @@ jQuery(function($) {
             return item;
         } 
     });
+
 });
 </script>
