@@ -4,6 +4,14 @@ $entities = json_decode(get_option('legal_entity'));
 $cost_centers = json_decode(get_option('cost_center'));
 $uda_approval = json_decode(get_option('uda_approval'));
 $company_leaders = json_decode(get_option('company_leaders'));
+$ICT_team = json_decode(get_option("UDA_ICT_team"));
+
+$auth_card_requests = get_posts(array(
+    'post_type'=>'auth_card_request',
+    'post_status'=>'private',
+    'posts_per_page'=>-1
+    )          
+);
 
 $change_requests = get_posts(array(
     'post_type'=>'auth_change_request',
@@ -244,25 +252,20 @@ if(isset($_POST['confirm'])) {
             throw new Exception("No changes!");
         }
 
-        is_email(trim($_POST['approver'])) && $approver_email = trim($_POST['approver']);
-        preg_match('/\<(.*?)\>/', $_POST['approver'], $matches);
-        $matches && $approver_email = $matches[1];
-        unset($matches);
+        $approver_email = get_email_address($_POST['approver']);
 
         if(empty($approver_email)) {
             throw new Exception("Not valid email format: " . $_POST['approver'] . ". Please use Name &lt;prefix@fcagroup.com&gt;");
         }
 
-        is_email(trim($_POST['requestor'])) && $requestor_email = trim($_POST['requestor']);
-        preg_match('/\<(.*?)\>/', $_POST['requestor'], $matches);
-        $matches && $requestor_email = $matches[1];
-        unset($matches);
+        $requestor_email = get_email_address($_POST['requestor']);
 
         if(empty($requestor_email)) {
             throw new Exception("Not valid email format: " . $_POST['requestor'] . ". Please use Name &lt;prefix@fcagroup.com&gt;");
         }
 
-        $request_no = get_option('auth_change_request_no', 0) + 1;
+        $request_no_tody = get_option('auth_change_request_no_' . date("Y-m-d"), 0) ? get_option('auth_change_request_no_' . date("Y-m-d"), 0) + 1 : 1;
+        $request_no = date("Y-m-d") . '-' . $request_no_tody;
         $approval_hash = md5($request_no . $_POST['requestor'] . NONCE_SALT);
 
         $approval_url = site_url() . '/auth-card-approval/?key=' . $approval_hash;
@@ -288,7 +291,7 @@ if(isset($_POST['confirm'])) {
                 throw new Exception("Failed to upload signature: " . $attachment_id->get_errer_message());
             }
 
-            update_option('auth_change_request_no', $request_no);
+            update_option('auth_change_request_no_' . date("Y-m-d"), $request_no_today);
             
             $request_id = wp_insert_post(array(
                 'post_type'=>'auth_card_request',
@@ -323,6 +326,23 @@ if(isset($_POST['confirm'])) {
         $error = $e->getMessage();
     }
 }
+
+if(isset($_POST['admin-change'])) {
+    try {
+
+        $ICT_team->WCF = $_POST['WCF'];
+        $ICT_team->SAP = $_POST['SAP'];
+        $ICT_team->Concur = $_POST['Concur'];
+        $ICT_team->compliance = $_POST['compliance'];
+
+        update_option('UDA_ICT_team', json_encode($ICT_team));
+
+        $success = "Users are updated!";
+
+    } catch(Exception $e) {
+        $error = $e->getMessage();
+    }
+}  
 
 $auth_cards = get_posts(array(
     'post_type'=>'auth_card',
@@ -407,7 +427,13 @@ $change_requests = get_posts(array(
                         <a href="#master" data-toggle="tab">Master Table</a>
                     </li>
                     <li>
-                        <a href="#changes" data-toggle="tab">Change Request</a>
+                        <a href="#my-request" data-toggle="tab">My Request</a>
+                    </li>
+                    <li>
+                        <a href="#all-requests" data-toggle="tab">All Requests</a>
+                    </li>
+                    <li>
+                        <a href="#admin" data-toggle="tab">Administration</a>
                     </li>
                 </ul>
             </div>
@@ -478,7 +504,7 @@ $change_requests = get_posts(array(
                     <button type="button" onclick="changeRequest()" class="btn btn-success pull-right">Change</button>                        
                     <?php } ?>
                 </div>
-                <div class="tab-pane" id="changes">
+                <div class="tab-pane" id="my-request">
                     <?php if(count($change_requests) > 0) { ?>
                     <form method="post" class="pull-right">
                         <button type="button" class="btn btn-primary" onclick="requestorInfo()">Fill in Requestor Information</button>
@@ -559,6 +585,71 @@ $change_requests = get_posts(array(
                             <?php } ?>
                         </tbody>
                     </table>
+                </div>
+                <div class="tab-pane" id="all-requests">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>Request No.</th>
+                                <th>Legal Entity</th>
+                                <th>Requestor</th>
+                                <th>Approver</th>
+                                <th>Submitted Date</th>
+                                <th>SAP Status</th>
+                                <th>Concur Status</th>
+                                <th>Status</th>    
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach($auth_card_requests as $auth_card_request) { ?>
+                            <tr>
+                                <td><a href="<?=site_url() . '/auth-card-approval/?key=' . $auth_card_request->approval_hash?>" target="_blank"><?=$auth_card_request->request_no?></a></td>
+                                <td><?=$auth_card_request->entity?></td>
+                                <td><?=$auth_card_request->requestor?></td>
+                                <td><?=$auth_card_request->approver?></td>
+                                <td><?=$auth_card_request->submitted_date?></td>
+                                <td><?=$auth_card_request->job_status_SAP?></td>
+                                <td><?=$auth_card_request->job_status_Concur?></td>
+                                <td><?=$auth_card_request->status?></td>
+                            </tr>
+                            <?php } ?>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="tab-pane" id="admin">
+                    <form class="form-horizontal" method="post">
+                        <div class="control-group">
+                            <label class="control-label">Compliance</label>
+                            <div class="controls">
+                                <input type="text" name="compliance" class="user-name" value="<?=$ICT_team->compliance?>" autocomplete="off" placeholder="Name <prefix@fcagroup.com>" required readonly />
+                                <button type="button" class="btn btn-success btn-small edit-admin">Edit</button>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">WCF</label>
+                            <div class="controls">
+                                <input type="text" name="WCF" class="user-name" value="<?=$ICT_team->WCF?>" autocomplete="off" placeholder="Name <prefix@fcagroup.com>" required readonly />
+                                <button type="button" class="btn btn-success btn-small edit-admin">Edit</button>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">SAP</label>
+                            <div class="controls">
+                                <input type="text" name="SAP" class="user-name" value="<?=$ICT_team->SAP?>" autocomplete="off" placeholder="Name <prefix@fcagroup.com>" required readonly />
+                                <button type="button" class="btn btn-success btn-small edit-admin">Edit</button>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">Concur</label>
+                            <div class="controls">
+                                <input type="text" name="Concur" class="user-name" value="<?=$ICT_team->Concur?>" autocomplete="off" placeholder="Name <prefix@fcagroup.com>" required readonly />
+                                <button type="button" class="btn btn-success btn-small edit-admin">Edit</button>
+                            </div>
+                        </div>
+                        <div class="form-actions submit-section hide">
+                            <button type="submit" name="admin-change" class="btn btn-primary">Submit</button>
+                        </div>
+                    </form>
                 </div>
             </div>
         </div>
@@ -816,7 +907,7 @@ jQuery(function($) {
         )
     });
 
-    $('.btn-success').click(function() {
+    $('.btn-success, .btn-primary').click(function() {
         btn_submit = $(this);
         setTimeout(function() {
             btn_submit.button('reset');
@@ -837,6 +928,12 @@ jQuery(function($) {
         highLighter: function(item) {
             return item;
         } 
+    });
+
+    $('.edit-admin').click(function() {
+        $(this).prev().val('').attr('readonly', false);
+        $(this).remove();
+        $('.submit-section').show();
     });
 
 });

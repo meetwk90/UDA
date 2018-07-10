@@ -1,6 +1,11 @@
 <?php
 $ICT_team = json_decode(get_option("UDA_ICT_team"));
 
+$WCF_email = get_email_address($ICT_team->WCF);
+$compliance_email = get_email_address($ICT_team->compliance);
+$concur_email = get_email_address($ICT_team->Concur);
+$SAP_email = get_email_address($ICT_team->SAP);
+
 $auth_card_request = get_posts(array(
     'post_type'=>'auth_card_request',
     'post_status'=>'private',
@@ -12,13 +17,40 @@ $auth_card_request = get_posts(array(
 )[0];
 
 $change_requests_id = json_decode($auth_card_request->change_requests_id);
-$change_requests = get_posts(array(
-    'post_type'=>'auth_change_request',
-    'post_status'=>'private',
-    'post__in'=>$change_requests_id,
-    'posts_per_page'=>-1
-    )          
-);
+
+if(wp_get_current_user()->user_email === $SAP_email) {
+    $change_requests = get_posts(array(
+        'post_type'=>'auth_change_request',
+        'post_status'=>'private',
+        'post__in'=>$change_requests_id,
+        'meta_query'=>array(
+            'relation' => 'OR',
+            array('key'=>'uda_section', 'value'=>'CapEx'),
+            array('key'=>'uda_section', 'value'=>'Non-CapEx')
+        ),
+        'posts_per_page'=>-1
+        )          
+    );
+} elseif(wp_get_current_user()->user_email === $concur_email) {
+    $change_requests = get_posts(array(
+        'post_type'=>'auth_change_request',
+        'post_status'=>'private',
+        'post__in'=>$change_requests_id,
+        'meta_query'=>array(
+            array('key'=>'uda_section', 'value'=>'Employee Expense')
+        ),
+        'posts_per_page'=>-1
+        )          
+    );
+} else {
+    $change_requests = get_posts(array(
+        'post_type'=>'auth_change_request',
+        'post_status'=>'private',
+        'post__in'=>$change_requests_id,
+        'posts_per_page'=>-1
+        )          
+    );
+}
 
 if(empty($auth_card_request)) {
     $error = 'Invalid approve key. The request has probably been removed.';
@@ -33,10 +65,10 @@ if(isset($_POST['status'])) {
 
             if($_POST['status'] === 'approve') {
 
-                $approval_hash = md5($auth_card_request->request_no . get_option('compliance_email') . NONCE_SALT);
+                $approval_hash = md5($auth_card_request->request_no . $ICT_team->compliance . NONCE_SALT);
                 $approval_url = site_url() . '/auth-card-approval/?key=' . $approval_hash;
 
-                $result_to_compliance = apaconnect_mail(get_option('compliance_email'), 'uda_to_compliance', array(
+                $result_to_compliance = apaconnect_mail($compliance_email, 'uda_to_compliance', array(
                     'request_no'=>$auth_card_request->request_no,
                     'requestor'=>$auth_card_request->requestor,
                     'approver'=>$auth_card_request->approver,
@@ -50,7 +82,7 @@ if(isset($_POST['status'])) {
                 if($result_to_compliance) {
                     update_post_meta($auth_card_request->ID, 'approval_hash', $approval_hash);
                 } else {
-                    throw new Exception("Fail to send email to " . get_option('compliance_email'));
+                    throw new Exception("Fail to send email to " . $ICT_team->compliance);
                 }
 
             } else {
@@ -93,7 +125,8 @@ if(isset($_POST['status'])) {
                 }
 
                 if($concur_change) {
-                    $result_to_concur = apaconnect_mail($ICT_team->Concur, 'uda_to_ict', array(
+
+                    $result_to_concur = apaconnect_mail($concur_email, 'uda_to_ict', array(
                         'request_no'=>$auth_card_request->request_no,
                         'requestor'=>$auth_card_request->requestor,
                         'approver'=>$auth_card_request->approver,
@@ -111,7 +144,8 @@ if(isset($_POST['status'])) {
                 }
 
                 if($sap_change) {
-                    $result_to_sap = apaconnect_mail($ICT_team->SAP, 'uda_to_ict', array(
+
+                    $result_to_sap = apaconnect_mail($SAP_email, 'uda_to_ict', array(
                         'request_no'=>$auth_card_request->request_no,
                         'requestor'=>$auth_card_request->requestor,
                         'approver'=>$auth_card_request->approver,
@@ -156,7 +190,15 @@ if(isset($_POST['status'])) {
 if(isset($_POST['proceed'])) {
     try {
 
-        update_post_meta($auth_card_request->ID, 'job_status_' . $_POST['type'], $_POST['job-status']);
+        if(wp_get_current_user()->user_email === $SAP_email) {
+            $type = 'SAP';
+        } elseif(wp_get_current_user()->user_email === $concur_email) {
+            $type = 'Concur';
+        } else {
+            throw new Exception("Please login as SAP or Concur responsibility!");
+        }
+
+        update_post_meta($auth_card_request->ID, 'job_status_' . $type, $_POST['job-status']);
         
         if($_POST['job-status'] === 'System change completed') {
 
@@ -170,14 +212,14 @@ if(isset($_POST['proceed'])) {
                 throw new Exception("Failed to upload signature: " . $attachment_id->get_errer_message());
             }
 
-            update_post_meta($auth_card_request->ID, $_POST['type'] . '_attachment_id', $attachment_id);
+            update_post_meta($auth_card_request->ID, $type . '_attachment_id', $attachment_id);
 
         }
 
         $approval_hash = get_post_meta($auth_card_request->ID, 'approval_hash', true);
         $approval_url = site_url() . '/auth-card-approval/?key=' . $approval_hash;
 
-        $result_to_wcf = apaconnect_mail($ICT_team->WCF, 'uda_to_ict', array(
+        $result_to_wcf = apaconnect_mail($WCF_email, 'uda_to_ict', array(
             'request_no'=>$auth_card_request->request_no,
             'requestor'=>$auth_card_request->requestor,
             'approver'=>$auth_card_request->approver,
@@ -186,6 +228,12 @@ if(isset($_POST['proceed'])) {
             'approval_link'=>$approval_url,
             'date'=>$auth_card_request->submitted_date
         ), false);
+
+        if(!$result_to_wcf) {
+            throw new Exception("Fail to send email to " . $ICT_team->WCF);
+        } else {
+            $success = "Status changed, email was sent to " . $ICT_team->WCF;
+        }
 
     } catch(Exception $e) {
         $error = $e->getMessage();
@@ -377,15 +425,8 @@ if(isset($_POST['finish'])) {
                 <h3 class="title">Proceed Approval</h3>
             </div>
             <div class="modal-body">
-                <?php if(wp_get_current_user()->user_email != $ICT_team->WCF) { ?>
+                <?php if(wp_get_current_user()->user_email != $WCF_email) { ?>
                     <?php if($auth_card_request->status === 'Pending for system change') { ?>
-                <div class="control-group">
-                    <label class="control-label">Type</label>
-                    <div class="controls">
-                        <label><input type="radio" name="type" value="SAP" checked> SAP</label>
-                        <label><input type="radio" name="type" value="Concur"> Concur</label>
-                    </div>
-                </div>
                 <div class="control-group">
                     <label class="control-label">Job Status</label>
                     <div class="controls">
@@ -414,7 +455,7 @@ if(isset($_POST['finish'])) {
             <div class="modal-footer">
                 <button type="button" class="btn close-modal">Close</button>
                 <?php if($auth_card_request->status === 'Pending for system change') { ?>
-                    <?php if(wp_get_current_user()->user_email == $ICT_team->WCF) { ?>
+                    <?php if(wp_get_current_user()->user_email == $WCF_email) { ?>
                 <button type="submit" name="finish" class="btn btn-success">Finish</button>
                     <?php } else { ?>
                 <button type="submit" name="proceed" class="btn btn-success">Proceed</button>

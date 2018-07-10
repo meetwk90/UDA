@@ -51,3 +51,10 @@ add_action('parse_query', function($wp_query) {
 		wp_enqueue_script('datetimepicker');
 	});
 });
+
+function get_email_address($full_address) {
+	is_email(trim($full_address)) && $email = trim($full_address);
+    preg_match('/\<(.*?)\>/', $full_address, $matches);
+    $matches && $email = $matches[1];
+    return $email;
+}
