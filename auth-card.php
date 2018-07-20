@@ -9,14 +9,14 @@ Author URI: http://meetwk90.github.io
 
 register_activation_hook(__FILE__, function() {
 	flush_rewrite_rules();
-	wp_insert_post(array('post_type'=>'page', 'post_title'=>'Authorization Card', 'post_status'=>'publish', 'post_content'=>'[auth-card]'));
+	wp_insert_post(array('post_type'=>'page', 'post_title'=>'APAC UDA Matrix Maintainance', 'post_status'=>'publish', 'post_content'=>'[auth-card]'));
 	wp_insert_post(array('post_type'=>'page', 'post_title'=>'Change Request', 'post_status'=>'publish', 'post_content'=>'[change-request]'));
 	wp_insert_post(array('post_type'=>'page', 'post_title'=>'Auth Card Approval', 'post_status'=>'publish', 'post_content'=>'[auth-card-approval]'));
 });
 
 register_deactivation_hook(__FILE__, function() {
 	flush_rewrite_rules();
-	$page = get_posts(array('name'=>'Authorization Card', 'post_type'=>'page'))[0];
+	$page = get_posts(array('name'=>'APAC UDA Matrix Maintainance', 'post_type'=>'page'))[0];
 	wp_delete_post($page->ID, true);
 	$page = get_posts(array('name'=>'Change Request', 'post_type'=>'page'))[0];
 	wp_delete_post($page->ID, true);

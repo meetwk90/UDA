@@ -5,13 +5,8 @@ $cost_centers = json_decode(get_option('cost_center'));
 $uda_approval = json_decode(get_option('uda_approval'));
 $company_leaders = json_decode(get_option('company_leaders'));
 $ICT_team = json_decode(get_option("UDA_ICT_team"));
-
-$auth_card_requests = get_posts(array(
-    'post_type'=>'auth_card_request',
-    'post_status'=>'private',
-    'posts_per_page'=>-1
-    )          
-);
+$compliance_emails = array_map('get_email_address', $ICT_team->Compliance);
+$admin_emails = array_map('get_email_address', $ICT_team->Administrator);
 
 $change_requests = get_posts(array(
     'post_type'=>'auth_change_request',
@@ -111,7 +106,7 @@ if(isset($_POST['add-new'])) {
                 add_post_meta($request_id, 'approval_type', $approval_type);
                 add_post_meta($request_id, 'cost_center', trim($_POST['cost-center']));
                 add_post_meta($request_id, 'cost_center_description', trim($_POST['description']));
-                
+
                 foreach($positions as $position) {
                     add_post_meta($request_id, $position, json_encode(array('')));
                 }
@@ -119,6 +114,8 @@ if(isset($_POST['add-new'])) {
                 if($section === 'Non-CapEx') {
                     $title = $approval_type === 'Operation Approval' ? 'Group CEO' : 'Group CFO';
                     update_post_meta($request_id, $title, json_encode($company_leaders->$title));
+                    add_post_meta($request_id, 'eligible_delegation_class', trim($_POST['eligible-delegation-class']));
+                    add_post_meta($request_id, 'note', trim($_POST['note']));
                 }
 
             }
@@ -136,7 +133,7 @@ if(isset($_POST['change-request'])) {
     try {
 
         if(is_user_logged_in()) {    
-
+            
             foreach($_POST['ID'] as $id) {
 
                 $existing_request = get_posts(array(
@@ -248,38 +245,65 @@ if(isset($_POST['cancel-changes'])) {
 if(isset($_POST['confirm'])) {
     try {
 
-        if(empty($change_requests)) {
-            throw new Exception("No changes!");
-        }
+        $request_no_today = get_option('auth_change_request_no_' . date("Ymd")) ? get_option('auth_change_request_no_' . date("Ymd")) + 1 : 1;
+        $request_no = date("Ymd") . '-' . $request_no_today;
 
-        $approver_email = get_email_address($_POST['approver']);
+        if(!in_array(wp_get_current_user()->user_email, $admin_emails)) {
+            
+            $requestor_email = get_email_address($_POST['requestor']);
 
-        if(empty($approver_email)) {
-            throw new Exception("Not valid email format: " . $_POST['approver'] . ". Please use Name &lt;prefix@fcagroup.com&gt;");
-        }
+            if(empty($requestor_email)) {
+                throw new Exception("Not valid email format: " . $_POST['requestor'] . ". Please use Name &lt;prefix@fcagroup.com&gt;");
+            }
 
-        $requestor_email = get_email_address($_POST['requestor']);
+            $approval_url = site_url() . '/auth-card-approval/?request=' . $request_no;
 
-        if(empty($requestor_email)) {
-            throw new Exception("Not valid email format: " . $_POST['requestor'] . ". Please use Name &lt;prefix@fcagroup.com&gt;");
-        }
+            if($_POST['jump-approver'] === 'y') {
 
-        $request_no_tody = get_option('auth_change_request_no_' . date("Y-m-d"), 0) ? get_option('auth_change_request_no_' . date("Y-m-d"), 0) + 1 : 1;
-        $request_no = date("Y-m-d") . '-' . $request_no_tody;
-        $approval_hash = md5($request_no . $_POST['requestor'] . NONCE_SALT);
+                foreach($compliance_emails as $email) {
+                    $result_to_compliance = apaconnect_mail($email, 'uda_to_compliance', array(
+                        'date'=>date("Y-m-d"),
+                        'request_no'=>$request_no,
+                        'requestor'=>$_POST['requestor'],
+                        'approver'=>$_POST['approver'],
+                        'entity'=>$_POST['entity'],
+                        'comments'=>$_POST['comments'],
+                        'approval_link'=>$approval_url,
+                        'status'=>'Pending for Compliance verification'
+                    ));
 
-        $approval_url = site_url() . '/auth-card-approval/?key=' . $approval_hash;
-        $result = apaconnect_mail($approver_email, 'uda_to_approver', array(
-            'date'=>date("Y-m-d"),
-            'request_no'=>$request_no,
-            'requestor'=>$_POST['requestor'],
-            'approver'=>$_POST['approver'],
-            'entity'=>$_POST['entity'],
-            'comments'=>$_POST['comments'],
-            'approval_link'=>$approval_url
-        ));
+                    if(!$result_to_compliance) {
+                        throw new Exception("Fail to send email to " . $email);
+                    }
+                }
 
-        if($result) {
+            } else {
+
+                if(empty($change_requests)) {
+                    throw new Exception("No changes!");
+                }
+
+                $approver_email = get_email_address($_POST['approver']);
+
+                if(empty($approver_email)) {
+                    throw new Exception("Not valid email format: " . $_POST['approver'] . ". Please use Name &lt;prefix@fcagroup.com&gt;");
+                }
+            
+                $result_to_approver = apaconnect_mail($approver_email, 'uda_to_approver', array(
+                    'date'=>date("Y-m-d"),
+                    'request_no'=>$request_no,
+                    'requestor'=>$_POST['requestor'],
+                    'approver'=>$_POST['approver'],
+                    'entity'=>$_POST['entity'],
+                    'comments'=>$_POST['comments'],
+                    'approval_link'=>$approval_url
+                ));
+
+                if(!$result_to_approver) {
+                    throw new Exception("Fail to send email to " . $approver_email);
+                }
+
+            }
 
             include_once ABSPATH . 'wp-admin/includes/media.php';
             include_once ABSPATH . 'wp-admin/includes/file.php';
@@ -291,53 +315,113 @@ if(isset($_POST['confirm'])) {
                 throw new Exception("Failed to upload signature: " . $attachment_id->get_errer_message());
             }
 
-            update_option('auth_change_request_no_' . date("Y-m-d"), $request_no_today);
-            
-            $request_id = wp_insert_post(array(
-                'post_type'=>'auth_card_request',
-                'post_title'=>'Auth Card Request No. ' . $request_no,
-                'post_status'=>'private'
-            ));
+        }
 
-            $change_requests_id = array();
-            foreach($change_requests as $change_request) {
-                array_push($change_requests_id, $change_request->ID);
-                update_post_meta($change_request->ID, 'status', 'Pending for approval');
-            }
-            update_post_meta($request_id, 'change_requests_id', json_encode($change_requests_id));
+        update_option('auth_change_request_no_' . date("Ymd"), $request_no_today);
+            
+        $request_id = wp_insert_post(array(
+            'post_type'=>'auth_card_request',
+            'post_title'=>'Auth Card Request No. ' . $request_no,
+            'post_status'=>'private'
+        ));
+
+        $change_requests_id = array();
+        foreach($change_requests as $change_request) {
+            array_push($change_requests_id, $change_request->ID);
+            update_post_meta($change_request->ID, 'status', 'Pending for approval');
+        }
+
+        update_post_meta($request_id, 'change_requests_id', json_encode($change_requests_id));
+        update_post_meta($request_id, 'request_no', $request_no);
+        update_post_meta($request_id, 'submitted_date', date('Y-m-d'));
+
+        if(!in_array(wp_get_current_user()->user_email, $admin_emails)) {
+
             update_post_meta($request_id, 'signature_id', $attachment_id);
             update_post_meta($request_id, 'approver', $_POST['approver']);
             update_post_meta($request_id, 'approver_email', $approver_email);
             update_post_meta($request_id, 'requestor', $_POST['requestor']);
             update_post_meta($request_id, 'requestor_email', $requestor_email);
             update_post_meta($request_id, 'entity', $_POST['entity']);
-            update_post_meta($request_id, 'request_no', $request_no);
-            update_post_meta($request_id, 'approval_hash', $approval_hash);
-            update_post_meta($request_id, 'submitted_date', date('Y-m-d'));
-            update_post_meta($request_id, 'status', 'Pending for approval');
-
-            $success = "Request has been submitted!";
-            
+            $_POST['jump-approver'] === 'y' ? update_post_meta($request_id, 'status', 'Pending for Compliance verification') : update_post_meta($request_id, 'status', 'Pending for approval');
+        
         } else {
-            throw new Exception("Fail to send email to " . $_POST['requestor']);
-        }
+
+            $change_requests = get_posts(array(
+                'post_type'=>'auth_change_request',
+                'post_status'=>'private',
+                'post__in'=>$change_requests_id,
+                'posts_per_page'=>-1
+                )          
+            );
+
+            /* update master table */
+            foreach($change_requests as $change_request) {
+                foreach(json_decode($change_request->approval) as $position) {
+                    update_post_meta($change_request->auth_card_id, $position, $change_request->$position);
+                    foreach(json_decode($change_request->$position) as $approver) {
+                        if($change_request->payment_auth_level) {
+                            foreach(json_decode($change_request->payment_auth_level)->$position as $item) {
+                                if(key((array) $item) === $approver) {
+                                    update_post_meta($change_request->auth_card_id, 'payment_auth_level-' . $approver, $item->$approver);
+                                }
+                            }
+                        }
+                        if($change_request->pr_auth_level) {
+                            foreach(json_decode($change_request->pr_auth_level)->$position as $item) {
+                                if(key((array) $item) === $approver) {
+                                    update_post_meta($change_request->auth_card_id, 'pr_auth_level-' . $approver, json_encode($item->$approver));
+                                }
+                            }
+                        }
+                        if($change_request->concur_auth_level) {
+                            foreach(json_decode($change_request->concur_auth_level)->$position as $item) {
+                                if(key((array) $item) === $approver) {
+                                    update_post_meta($change_request->auth_card_id, 'concur_auth_level-' . $approver, $item->$approver);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            $status = 'Finished';
+            update_post_meta($request_id, 'status', $status);
+            update_post_meta($request_id, 'finish_date', date('Y-m-d'));
+
+        }    
+        
+        $success = "Request has been submitted!";
         
     } catch(Exception $e) {
         $error = $e->getMessage();
     }
 }
 
-if(isset($_POST['admin-change'])) {
+if(isset($_POST['add-user'])) {
     try {
 
-        $ICT_team->WCF = $_POST['WCF'];
-        $ICT_team->SAP = $_POST['SAP'];
-        $ICT_team->Concur = $_POST['Concur'];
-        $ICT_team->compliance = $_POST['compliance'];
-
-        update_option('UDA_ICT_team', json_encode($ICT_team));
+        if(!in_array($_POST['new-user'], $ICT_team->$_POST['group'])) {
+            array_push($ICT_team->$_POST['group'], $_POST['new-user']);
+            update_option('UDA_ICT_team', json_encode($ICT_team));
+        } else {
+            throw new Exception("Failed, user is existed!");
+        }
 
         $success = "Users are updated!";
+
+    } catch(Exception $e) {
+        $error = $e->getMessage();
+    }
+}  
+
+if(isset($_POST['delete-user'])) {
+    try {
+
+        array_splice($ICT_team->$_POST['group'], array_search($_POST['delete-user'], $ICT_team->$_POST['group']), 1);
+        update_option('UDA_ICT_team', json_encode($ICT_team));
+
+        $success = "User are deleted!";
 
     } catch(Exception $e) {
         $error = $e->getMessage();
@@ -367,6 +451,27 @@ $change_requests = get_posts(array(
     'posts_per_page'=>-1
     )          
 );
+
+$ICT_team = json_decode(get_option("UDA_ICT_team"));
+
+if(isset($_POST['requests-filter'])) {
+    $auth_card_requests = get_posts(array(
+        'post_type'=>'auth_card_request',
+        'post_status'=>'private',
+        'meta_query'=>array(
+            array('key'=>'status', 'value'=>$_POST['statuses'])
+        ),
+        'posts_per_page'=>-1
+        )          
+    );
+    } else {
+    $auth_card_requests = get_posts(array(
+        'post_type'=>'auth_card_request',
+        'post_status'=>'private',
+        'posts_per_page'=>-1
+        )          
+    );
+}
 ?>
 
 <style>
@@ -407,6 +512,9 @@ $change_requests = get_posts(array(
 .no-border {
     border-top: none !important;
 }
+table th {
+    white-space: nowrap;
+}
 </style>
 
 <div class="site-content box" role="main">
@@ -424,17 +532,19 @@ $change_requests = get_posts(array(
             <div class="tabbale">
                 <ul class="nav nav-tabs">
                     <li class="active">
-                        <a href="#master" data-toggle="tab">Master Table</a>
+                        <a href="#master" data-toggle="tab">APAC UDA Matrix</a>
                     </li>
                     <li>
-                        <a href="#my-request" data-toggle="tab">My Request</a>
+                        <a href="#my-request" data-toggle="tab">My Authorization Card Request</a>
                     </li>
                     <li>
-                        <a href="#all-requests" data-toggle="tab">All Requests</a>
+                        <a href="#all-requests" data-toggle="tab">All Tickets Status</a>
                     </li>
+                    <?php if(in_array(wp_get_current_user()->user_email, $admin_emails)) { ?>
                     <li>
-                        <a href="#admin" data-toggle="tab">Administration</a>
+                        <a href="#admin" data-toggle="tab">User Management</a>
                     </li>
+                    <?php } ?>
                 </ul>
             </div>
             <div class="tab-content">
@@ -466,7 +576,13 @@ $change_requests = get_posts(array(
                     <table class="table table-bordered table-view">
                         <tbody>
                             <tr>
-                                <th colspan="2"><?=$_POST['approval-type']?></th>
+                                <?php if($_POST['uda-section'] === 'Non-CapEx') { ?>
+                                <th colspan="4">
+                                <?php } else { ?>
+                                <th colspan="2">
+                                <?php } ?>
+                                <?=$_POST['approval-type']?>
+                                </th>
                                 <th class="no-border"></th>
                                 <?php foreach($uda_approval as $approval) { ?>
                                     <?php if($approval->approval_type === $_POST['approval-type'] && $approval->uda_section === $_POST['uda-section'] && $approval->entity_type === $_POST['entity-type']) { ?>
@@ -479,6 +595,10 @@ $change_requests = get_posts(array(
                             <tr>
                                 <th>Cost Center Description</th>
                                 <th>Cost Center</th>
+                                <?php if($_POST['uda-section'] === 'Non-CapEx') { ?>
+                                <th>Eligible Delegation Class</th>
+                                <th>Note</th>
+                                <?php } ?>
                                 <th class="no-border"></th>
                                 <?php if($_POST['uda-section'] === 'Non-CapEx') { ?>
                                 <th class="level">Group Level</th>
@@ -489,6 +609,10 @@ $change_requests = get_posts(array(
                             <tr>
                                 <td><?=$auth_card->cost_center_description?></td>
                                 <td><?=$auth_card->cost_center?></td>
+                                <?php if($_POST['uda-section'] === 'Non-CapEx') { ?>
+                                <td><?=$auth_card->eligible_delegation_class?></td>
+                                <td><?=$auth_card->note?></td>
+                                <?php } ?>
                                 <td class="no-border"></td>
                                 <?php foreach($uda_approval as $approval) { ?>
                                     <?php if($approval->approval_type === $_POST['approval-type'] && $approval->uda_section === $_POST['uda-section'] && $approval->entity_type === $_POST['entity-type']) { ?>
@@ -501,13 +625,17 @@ $change_requests = get_posts(array(
                             <?php } ?>
                         </tbody>
                     </table>
-                    <button type="button" onclick="changeRequest()" class="btn btn-success pull-right">Change</button>                        
+                    <button type="button" onclick="changeRequest()" class="btn btn-primary pull-right">Change</button>                        
                     <?php } ?>
                 </div>
                 <div class="tab-pane" id="my-request">
                     <?php if(count($change_requests) > 0) { ?>
                     <form method="post" class="pull-right">
+                        <?php if(in_array(wp_get_current_user()->user_email, $admin_emails)) { ?>
+                        <button type="submit" class="btn btn-success" name="confirm">Confirm Changes</button>
+                        <?php } else { ?>
                         <button type="button" class="btn btn-primary" onclick="requestorInfo()">Fill in Requestor Information</button>
+                        <?php } ?>
                         <button type="submit" class="btn btn-danger" name="cancel-changes">Cancel</button>
                     </form>
                     <?php } ?>
@@ -587,69 +715,216 @@ $change_requests = get_posts(array(
                     </table>
                 </div>
                 <div class="tab-pane" id="all-requests">
-                    <table class="table table-striped">
+                    <form method="post" class="form-inline pull-left">
+                        <input type="text" name="search" placeholder="Search..." autocomplete="off" />
+                        <select name="statuses">
+                            <option>Show All Statuses</option>
+                            <option value="Pending for approval">Pending for approval</option>
+                            <option value="Pending for Compliance verification">Pending for Compliance verification</option>
+                            <option value="Pending for system change">Pending for system change</option>
+                            <option value="Finished">Finished</option>
+                        </select>
+                        <button type="submit" name="requests-filter" class="btn">Filter</button>
+                    </form>
+                    <table class="table table-striped table-hover">
                         <thead>
                             <tr>
-                                <th>Request No.</th>
+                                <th>Request No.<span class="icon icon-info-sign" title="Click No. For More Information"></span></th>
                                 <th>Legal Entity</th>
                                 <th>Requestor</th>
-                                <th>Approver</th>
                                 <th>Submitted Date</th>
+                                <th>Approver</th>
+                                <th>Approve Date</th>
+                                <th>Compliance</th>
+                                <th>Verify Date</th>
                                 <th>SAP Status</th>
+                                <th>SAP Complete Date</th>
                                 <th>Concur Status</th>
+                                <th>Concur Complete Date</th>
                                 <th>Status</th>    
+                                <th>Finish Date</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php foreach($auth_card_requests as $auth_card_request) { ?>
                             <tr>
-                                <td><a href="<?=site_url() . '/auth-card-approval/?key=' . $auth_card_request->approval_hash?>" target="_blank"><?=$auth_card_request->request_no?></a></td>
+                                <td><a href="<?=site_url() . '/auth-card-approval/?request=' . $auth_card_request->request_no?>" target="_blank"><?=$auth_card_request->request_no?></a></td>
                                 <td><?=$auth_card_request->entity?></td>
                                 <td><?=$auth_card_request->requestor?></td>
-                                <td><?=$auth_card_request->approver?></td>
                                 <td><?=$auth_card_request->submitted_date?></td>
+                                <td><?=$auth_card_request->approver?></td>
+                                <td><?=$auth_card_request->approve_date?></td>
+                                <td><?=$auth_card_request->verify_name?></td>
+                                <td><?=$auth_card_request->verify_date?></td>
                                 <td><?=$auth_card_request->job_status_SAP?></td>
+                                <td><?=$auth_card_request->SAP_complete_date?></td>
                                 <td><?=$auth_card_request->job_status_Concur?></td>
+                                <td><?=$auth_card_request->Concur_complete_date?></td>
                                 <td><?=$auth_card_request->status?></td>
+                                <td><?=$auth_card_request->finish_date?></td>
                             </tr>
                             <?php } ?>
                         </tbody>
                     </table>
                 </div>
                 <div class="tab-pane" id="admin">
-                    <form class="form-horizontal" method="post">
-                        <div class="control-group">
-                            <label class="control-label">Compliance</label>
-                            <div class="controls">
-                                <input type="text" name="compliance" class="user-name" value="<?=$ICT_team->compliance?>" autocomplete="off" placeholder="Name <prefix@fcagroup.com>" required readonly />
-                                <button type="button" class="btn btn-success btn-small edit-admin">Edit</button>
-                            </div>
-                        </div>
-                        <div class="control-group">
-                            <label class="control-label">WCF</label>
-                            <div class="controls">
-                                <input type="text" name="WCF" class="user-name" value="<?=$ICT_team->WCF?>" autocomplete="off" placeholder="Name <prefix@fcagroup.com>" required readonly />
-                                <button type="button" class="btn btn-success btn-small edit-admin">Edit</button>
-                            </div>
-                        </div>
-                        <div class="control-group">
-                            <label class="control-label">SAP</label>
-                            <div class="controls">
-                                <input type="text" name="SAP" class="user-name" value="<?=$ICT_team->SAP?>" autocomplete="off" placeholder="Name <prefix@fcagroup.com>" required readonly />
-                                <button type="button" class="btn btn-success btn-small edit-admin">Edit</button>
-                            </div>
-                        </div>
-                        <div class="control-group">
-                            <label class="control-label">Concur</label>
-                            <div class="controls">
-                                <input type="text" name="Concur" class="user-name" value="<?=$ICT_team->Concur?>" autocomplete="off" placeholder="Name <prefix@fcagroup.com>" required readonly />
-                                <button type="button" class="btn btn-success btn-small edit-admin">Edit</button>
-                            </div>
-                        </div>
-                        <div class="form-actions submit-section hide">
-                            <button type="submit" name="admin-change" class="btn btn-primary">Submit</button>
-                        </div>
-                    </form>
+                    <div class="btn-group tab-control">
+                        <button class="compliance btn btn-small">Compliance</button>
+                        <button class="SAP btn btn-small">SAP</button>
+                        <button class="account btn btn-small">SAP Account</button>
+                        <button class="concur btn btn-small">Concur</button>
+                        <button class="WCF btn btn-small">WCF</button>
+                        <button class="admin btn btn-small">Administrator</button>
+                    </div>
+                    <div class="pull-right">
+                        <?php if(in_array(wp_get_current_user()->user_email, $admin_emails)) { ?>
+                        <button type="button" onclick="addUser()" class="btn btn-primary">Add User</button>
+                        <?php } ?>
+                    </div>
+                    <div class="tab-item compliance hide">
+                        <form method="post">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Email Address</th>
+                                        <th>Group</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach($ICT_team->Compliance as $user) { ?>
+                                    <tr>
+                                        <td><?=$user?></td>
+                                        <td><?=get_email_address($user)?></td>
+                                        <td>Compliance<input type="hidden" name="group" value="Compliance" /></td>
+                                        <td><button type="submit" name="delete-user" value="<?=$user?>" class="btn btn-small btn-danger">Delete</button></td>
+                                    </tr>   
+                                    <?php } ?>
+                                </tbody>
+                            </table>
+                        </form>
+                    </div>
+                    <div class="tab-item SAP hide">
+                        <form method="post">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Email Address</th>
+                                        <th>Group</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach($ICT_team->SAP as $user) { ?>
+                                    <tr>
+                                        <td><?=$user?></td>
+                                        <td><?=get_email_address($user)?></td>
+                                        <td>SAP<input type="hidden" name="group" value="SAP" /></td>
+                                        <td><button type="submit" name="delete-user" value="<?=$user?>" class="btn btn-small btn-danger">Delete</button></td>
+                                    </tr>   
+                                    <?php } ?>
+                                </tbody>
+                            </table>
+                        </form>
+                    </div>
+                    <div class="tab-item account hide">
+                        <form method="post">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Email Address</th>
+                                        <th>Group</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach($ICT_team->Account as $user) { ?>
+                                    <tr>
+                                        <td><?=$user?></td>
+                                        <td><?=get_email_address($user)?></td>
+                                        <td>SAP Account<input type="hidden" name="group" value="Account" /></td>
+                                        <td><button type="submit" name="delete-user" value="<?=$user?>" class="btn btn-small btn-danger">Delete</button></td>
+                                    </tr>   
+                                    <?php } ?>
+                                </tbody>
+                            </table>
+                        </form>
+                    </div>
+                    <div class="tab-item concur hide">
+                        <form method="post">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Email Address</th>
+                                        <th>Group</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach($ICT_team->Concur as $user) { ?>
+                                    <tr>
+                                        <td><?=$user?></td>
+                                        <td><?=get_email_address($user)?></td>
+                                        <td>Concur<input type="hidden" name="group" value="Concur" /></td>
+                                        <td><button type="submit" name="delete-user" value="<?=$user?>" class="btn btn-small btn-danger">Delete</button></td>
+                                    </tr>   
+                                    <?php } ?>
+                                </tbody>
+                            </table>
+                        </form>
+                    </div>
+                    <div class="tab-item WCF hide">
+                        <form method="post">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Email Address</th>
+                                        <th>Group</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach($ICT_team->WCF as $user) { ?>
+                                    <tr>
+                                        <td><?=$user?></td>
+                                        <td><?=get_email_address($user)?></td>
+                                        <td>WCF<input type="hidden" name="group" value="WCF" /></td>
+                                        <td><button type="submit" name="delete-user" value="<?=$user?>" class="btn btn-small btn-danger">Delete</button></td>
+                                    </tr>   
+                                    <?php } ?>
+                                </tbody>
+                            </table>
+                        </form>
+                    </div>
+                    <div class="tab-item admin hide">
+                        <form method="post">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Email Address</th>
+                                        <th>Group</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach($ICT_team->Administrator as $user) { ?>
+                                    <tr>
+                                        <td><?=$user?></td>
+                                        <td><?=get_email_address($user)?></td>
+                                        <td>Administrator<input type="hidden" name="group" value="Administrator" /></td>
+                                        <td><button type="submit" name="delete-user" value="<?=$user?>" class="btn btn-small btn-danger">Delete</button></td>
+                                    </tr>   
+                                    <?php } ?>
+                                </tbody>
+                            </table>
+                        </form>
+                    </div>
                 </div>
             </div>
         </div>
@@ -754,6 +1029,18 @@ $change_requests = get_posts(array(
                         <input type="text" name="description" required>
                     </div>
                 </div>
+                <div class="control-group Non-CapEx hide">
+                    <label class="control-label">Eligible Delegation Class</label>
+                    <div class="controls">
+                        <input type="text" name="eligible-delegation-class" required>
+                    </div>
+                </div>
+                <div class="control-group Non-CapEx hide">
+                    <label class="control-label">Note</label>
+                    <div class="controls">
+                        <input type="text" name="note" required>
+                    </div>
+                </div>
                 <div class="control-group">
                     <label class="control-label">Legal Entity</label>
                     <div class="controls">
@@ -806,6 +1093,13 @@ $change_requests = get_posts(array(
                     </div>
                 </div>
                 <div class="control-group">
+                    <label class="control-label">N2</label>
+                    <div class="controls">
+                        <label><input type="radio" name="jump-approver" value="y"> Yes</label>
+                        <label><input type="radio" name="jump-approver" value="n" checked> No</label>
+                    </div>
+                </div>
+                <div class="control-group approver">
                     <label class="control-label">Approver</label>
                     <div class="controls">
                         <input type="text" class="user-name" name="approver" autocomplete="off" placeholder="Name <prefix@fcagroup.com>" required />
@@ -829,6 +1123,42 @@ $change_requests = get_posts(array(
                 <button type="submit" name="confirm" class="btn btn-success">Submit</button>
             </div>
         </form>
+    </div>
+    <div class="add-new-user modal hide fade">
+        <form method="post" class="form-horizontal">
+            <div class="modal-header">
+                <h3 class="title">Add New User</h3>
+            </div>
+            <div class="modal-body">
+                <!-- <div class="control-group">
+                    <label class="control-label">Action</label>
+                    <div class="controls">
+                        <label><input type="radio" value="add" name="action" checked /> Add</label>
+                        <label><input type="radio" value="delete" name="action" /> Delete</label>
+                    </div>
+                </div>     -->
+                <div class="control-group">
+                    <label class="control-label">Group</label>
+                    <div class="controls">
+                        <select name="group">
+                            <?php foreach((array)$ICT_team as $group => $user) { ?>
+                            <option value="<?=$group?>"><?=$group?></option>
+                            <?php } ?>
+                        </select>
+                    </div>
+                </div>            
+                <div class="control-group">
+                    <label class="control-label">User</label>
+                    <div class="controls">
+                        <input type="text" class="user-name" name="new-user" autocomplete="off" placeholder="Name <prefix@fcagroup.com>" required />
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn close-modal">Close</button>
+                <button type="submit" name="add-user" class="btn btn-success">Submit</button>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -883,6 +1213,10 @@ jQuery(function($) {
         $('.requestor-info-modal').modal('show');
     }
 
+    window.addUser = function() {
+        $('.add-new-user').modal('show');
+    }
+
     $('select#cost-center-for-change-request').listbox();
 
     $('#approval-selected, #cost-center-for-change-request').change(function() {
@@ -930,10 +1264,34 @@ jQuery(function($) {
         } 
     });
 
-    $('.edit-admin').click(function() {
-        $(this).prev().val('').attr('readonly', false);
-        $(this).remove();
-        $('.submit-section').show();
+    $.each(['compliance', 'SAP', 'account', 'concur', 'WCF', 'admin'], function(index, item) {
+        $('button.' + item).click(function() {
+            $('.tab-item').hide();
+            $('.tab-item.' + item).fadeIn();
+            $('.tab-control .btn').removeClass('active');
+            $('.tab-control .btn.' + item).addClass('active');
+            // window.location.hash = item;
+        });
+    });
+
+    $('[name="jump-approver"]').change(function() {
+        if($('[name="jump-approver"][value="y"]').prop('checked')) {
+            $('.approver').hide();
+            $('.approver input').attr('required', false);
+        } else {
+            $('.approver').show();
+            $('.approver input').attr('required', true);
+        }
+    });
+
+    $('[name="uda-section[]"]').change(function() {
+        if($('[name="uda-section[]"][value="Non-CapEx"]').prop('checked')) {
+            $('.Non-CapEx').show();
+            $('.Non-CapEx input').attr('required', true);
+        } else {
+            $('.Non-CapEx').hide();
+            $('.Non-CapEx input').attr('required', false);
+        }
     });
 
 });
