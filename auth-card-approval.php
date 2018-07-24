@@ -167,10 +167,12 @@ if(isset($_POST['status'])) {
 
                     foreach($account_emails as $email) {
 
-                        apaconnect_mail($email, 'uda_to_ict', array(
+                        apaconnect_mail($email, 'uda_to_sap_account_admin', array(
                             'request_no'=>$auth_card_request->request_no,
                             'requestor'=>$auth_card_request->requestor,
                             'approver'=>$auth_card_request->approver,
+                            'approver_tid'=>$auth_card_request->approver_tid,
+                            'approver_fid'=>$auth_card_request->approver_fid,
                             'entity'=>$auth_card_request->entity,
                             'status'=>$status,
                             'approval_link'=>$approval_url,

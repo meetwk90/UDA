@@ -340,6 +340,8 @@ if(isset($_POST['confirm'])) {
             update_post_meta($request_id, 'signature_id', $attachment_id);
             update_post_meta($request_id, 'approver', $_POST['approver']);
             update_post_meta($request_id, 'approver_email', $approver_email);
+            update_post_meta($request_id, 'approver_tid', get_user_by('email', $approver_email)->logon_id);
+            update_post_meta($request_id, 'approver_fid', get_user_by('email', $approver_email)->employee_id);
             update_post_meta($request_id, 'requestor', $_POST['requestor']);
             update_post_meta($request_id, 'requestor_email', $requestor_email);
             update_post_meta($request_id, 'entity', $_POST['entity']);
@@ -455,22 +457,82 @@ $change_requests = get_posts(array(
 $ICT_team = json_decode(get_option("UDA_ICT_team"));
 
 if(isset($_POST['requests-filter'])) {
-    $auth_card_requests = get_posts(array(
-        'post_type'=>'auth_card_request',
-        'post_status'=>'private',
-        'meta_query'=>array(
-            array('key'=>'status', 'value'=>$_POST['statuses'])
-        ),
-        'posts_per_page'=>-1
-        )          
-    );
+    if($_POST['statuses'] !== 'All') {
+        $auth_card_requests = get_posts(array(
+            'post_type'=>'auth_card_request',
+            'post_status'=>'private',
+            'meta_query'=>array(
+                array(
+                    'relation'=>'OR',
+                    array('key'=>'entity', 'value'=>$_POST['search'], 'compare'=>'LIKE'),
+                    array('key'=>'requestor', 'value'=>$_POST['search'], 'compare'=>'LIKE'),
+                    array('key'=>'approver', 'value'=>$_POST['search'], 'compare'=>'LIKE'),
+                    array('key'=>'verify_name', 'value'=>$_POST['search'], 'compare'=>'LIKE'),
+                    array('key'=>'job_status_SAP', 'value'=>$_POST['search'], 'compare'=>'LIKE'),
+                    array('key'=>'job_status_Concur', 'value'=>$_POST['search'], 'compare'=>'LIKE')
+                ),
+                array('key'=>'status', 'value'=>$_POST['statuses'])
+            ),
+            'posts_per_page'=>-1
+            )          
+        );
     } else {
+        $auth_card_requests = get_posts(array(
+            'post_type'=>'auth_card_request',
+            'post_status'=>'private',
+            'meta_query'=>array(
+                'relation'=>'OR',
+                array('key'=>'entity', 'value'=>$_POST['search'], 'compare'=>'LIKE'),
+                array('key'=>'requestor', 'value'=>$_POST['search'], 'compare'=>'LIKE'),
+                array('key'=>'approver', 'value'=>$_POST['search'], 'compare'=>'LIKE'),
+                array('key'=>'compliance', 'value'=>$_POST['search'], 'compare'=>'LIKE'),
+                array('key'=>'job_status_SAP', 'value'=>$_POST['search'], 'compare'=>'LIKE'),
+                array('key'=>'job_status_Concur', 'value'=>$_POST['search'], 'compare'=>'LIKE')
+            ),
+            'posts_per_page'=>-1
+            )          
+        );
+    }
+} else {
     $auth_card_requests = get_posts(array(
         'post_type'=>'auth_card_request',
         'post_status'=>'private',
         'posts_per_page'=>-1
         )          
     );
+}
+
+if(isset($_POST['export'])) {
+
+    $headline = ['request_no', 'entity', 'requestor', 'submitted_date', 'approver', 'approve_date', 'compliance', 'verify_date', 'job_status_SAP', 'SAP_complete_date', 'job_status_Concur', 'Concur_complete_date', 'status', 'finish_date'];
+
+    $stats = array();
+    foreach($auth_card_requests as $row) {
+        $stats[$row->ID] = array();
+        foreach($headline as $head) {
+            $stats[$row->ID][$head] = $row->$head;
+        }
+    }
+
+    $excel = new PHPExcel;
+
+    $excel->setActiveSheetIndex(0);
+    $excel->getActiveSheet()->fromArray($headline, null, 'A1');
+    $excel->getActiveSheet()->fromArray($stats, null, 'A2');
+
+    for($letter = 'A'; $letter < 'O'; $letter++) {
+        $excel->getActiveSheet()->getColumnDimension($letter)->setAutoSize(true);
+    }
+
+    $writer = new PHPExcel_Writer_Excel2007($excel);
+
+    $report_name = 'Report-UDA-' . time() . '.xlsx';
+    $report_path = wp_upload_dir()['path'] . '/' . $report_name;
+    
+    $writer->save($report_path);
+
+    forceRedirect(wp_upload_dir()['url'] . '/' . $report_name);
+
 }
 ?>
 
@@ -715,16 +777,17 @@ table th {
                     </table>
                 </div>
                 <div class="tab-pane" id="all-requests">
-                    <form method="post" class="form-inline pull-left">
+                    <form method="post" class="form-inline">
                         <input type="text" name="search" placeholder="Search..." autocomplete="off" />
                         <select name="statuses">
-                            <option>Show All Statuses</option>
-                            <option value="Pending for approval">Pending for approval</option>
-                            <option value="Pending for Compliance verification">Pending for Compliance verification</option>
-                            <option value="Pending for system change">Pending for system change</option>
-                            <option value="Finished">Finished</option>
+                            <option value="All">Show All Statuses</option>
+                            <option value="Pending for approval" <?php if(isset($_POST['requests-filter']) && $_POST['statuses'] === 'Pending for approval') { ?>selected<?php } ?>>Pending for approval</option>
+                            <option value="Pending for Compliance verification" <?php if(isset($_POST['requests-filter']) && $_POST['statuses'] === 'Pending for Compliance verification') { ?>selected<?php } ?>>Pending for Compliance verification</option>
+                            <option value="Pending for system change" <?php if(isset($_POST['requests-filter']) && $_POST['statuses'] === 'Pending for system change') { ?>selected<?php } ?>>Pending for system change</option>
+                            <option value="Finished" <?php if(isset($_POST['requests-filter']) && $_POST['statuses'] === 'Finished') { ?>selected<?php } ?>>Finished</option>
                         </select>
                         <button type="submit" name="requests-filter" class="btn">Filter</button>
+                        <button type="submit" name="export" class="btn pull-right">Export</button>
                     </form>
                     <table class="table table-striped table-hover">
                         <thead>
@@ -732,15 +795,15 @@ table th {
                                 <th>Request No.<span class="icon icon-info-sign" title="Click No. For More Information"></span></th>
                                 <th>Legal Entity</th>
                                 <th>Requestor</th>
-                                <th>Submitted Date</th>
+                                <!-- <th>Submitted Date</th> -->
                                 <th>Approver</th>
-                                <th>Approve Date</th>
-                                <th>Compliance</th>
-                                <th>Verify Date</th>
+                                <!-- <th>Approve Date</th> -->
+                                <!-- <th>Compliance</th> -->
+                                <!-- <th>Verify Date</th> -->
                                 <th>SAP Status</th>
-                                <th>SAP Complete Date</th>
+                                <!-- <th>SAP Complete Date</th> -->
                                 <th>Concur Status</th>
-                                <th>Concur Complete Date</th>
+                                <!-- <th>Concur Complete Date</th> -->
                                 <th>Status</th>    
                                 <th>Finish Date</th>
                             </tr>
@@ -751,15 +814,15 @@ table th {
                                 <td><a href="<?=site_url() . '/auth-card-approval/?request=' . $auth_card_request->request_no?>" target="_blank"><?=$auth_card_request->request_no?></a></td>
                                 <td><?=$auth_card_request->entity?></td>
                                 <td><?=$auth_card_request->requestor?></td>
-                                <td><?=$auth_card_request->submitted_date?></td>
+                                <!-- <td><?=$auth_card_request->submitted_date?></td> -->
                                 <td><?=$auth_card_request->approver?></td>
-                                <td><?=$auth_card_request->approve_date?></td>
-                                <td><?=$auth_card_request->verify_name?></td>
-                                <td><?=$auth_card_request->verify_date?></td>
+                                <!-- <td><?=$auth_card_request->approve_date?></td> -->
+                                <!-- <td><?=$auth_card_request->verify_name?></td> -->
+                                <!-- <td><?=$auth_card_request->verify_date?></td> -->
                                 <td><?=$auth_card_request->job_status_SAP?></td>
-                                <td><?=$auth_card_request->SAP_complete_date?></td>
+                                <!-- <td><?=$auth_card_request->SAP_complete_date?></td> -->
                                 <td><?=$auth_card_request->job_status_Concur?></td>
-                                <td><?=$auth_card_request->Concur_complete_date?></td>
+                                <!-- <td><?=$auth_card_request->Concur_complete_date?></td> -->
                                 <td><?=$auth_card_request->status?></td>
                                 <td><?=$auth_card_request->finish_date?></td>
                             </tr>
@@ -1262,6 +1325,15 @@ jQuery(function($) {
         highLighter: function(item) {
             return item;
         } 
+    });
+
+    var hash = document.location.hash;
+    if(hash) {
+        $('.nav-tabs a[href="' + hash + '"]').tab('show');
+    }
+
+    $('.nav-tabs a').on('shown.bs.tab', function(e) {
+        window.location.hash = e.target.hash;
     });
 
     $.each(['compliance', 'SAP', 'account', 'concur', 'WCF', 'admin'], function(index, item) {
